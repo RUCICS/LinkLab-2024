@@ -1,0 +1,44 @@
+name: GitHub Classroom Autograding
+
+on:
+  - push
+  - repository_dispatch
+
+permissions:
+  checks: write
+  actions: read
+  contents: read
+
+jobs:
+  autograding:
+    name: Autograding
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-classroom[bot]'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install rich tomli
+
+      - name: Run demo test
+        id: demo-test
+        uses: panjd123/autograding-command-grader@v1
+        with:
+          test-name: 1-demo
+          command: python grader.py 1-demo --json
+          timeout: 10
+          max-score: 10
+
+      - name: Report results
+        uses: panjd123/autograding-grading-reporter@v1
+        env:
+          DEMO-TEST_RESULTS: ${{ steps.demo-test.outputs.result }}
+        with:
+          runners: demo-test

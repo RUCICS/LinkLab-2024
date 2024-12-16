@@ -540,6 +540,42 @@ class Grader:
             self.console.print(summary)
             self.console.print()
 
+    def list_test_cases(self, specific_test: Optional[str] = None):
+        """列出所有测试用例的信息而不执行它们"""
+        test_cases = self.load_test_cases(specific_test)
+        
+        if self.json_output:
+            # JSON格式输出
+            cases_info = [
+                {
+                    "name": test.meta["name"],
+                    "description": test.meta.get("description", "No description"),
+                    "score": test.meta["score"],
+                    "path": str(test.path.name)
+                }
+                for test in test_cases
+            ]
+            print(json.dumps({"test_cases": cases_info}, ensure_ascii=False))
+        else:
+            # 表格形式输出
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("Test Case", style="cyan")
+            table.add_column("Description")
+            table.add_column("Score", justify="right")
+            table.add_column("Path")
+
+            for test in test_cases:
+                table.add_row(
+                    test.meta["name"],
+                    test.meta.get("description", "No description"),
+                    f"{test.meta['score']:.1f}",
+                    str(test.path.name)
+                )
+
+            self.console.print("\n[bold]Available Test Cases:[/bold]\n")
+            self.console.print(table)
+            self.console.print()
+
 
 def check_dependencies():
     """Check if required dependencies are installed"""
@@ -565,11 +601,18 @@ def main():
     parser.add_argument(
         "--json", action="store_true", help="Output results in JSON format"
     )
+    parser.add_argument(
+        "--list", action="store_true", help="List all test cases without running them"
+    )
     parser.add_argument("test", nargs="?", help="Specific test to run")
     args = parser.parse_args()
 
     grader = Grader(json_output=args.json)
-    grader.run_all_tests(args.test)
+    
+    if args.list:
+        grader.list_test_cases(args.test)
+    else:
+        grader.run_all_tests(args.test)
 
 
 if __name__ == "__main__":
