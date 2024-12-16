@@ -33,18 +33,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install rich tomli
 
-      - name: Run demo test
-        id: demo-test
+      - name: Run tests
+        id: tests
         uses: panjd123/autograding-command-grader@v1
         with:
-          test-name: 1-demo
-          command: python grader.py 1-demo --json
+          test-name: tests
+          setup-command: |
+            make all
+          command: python3 autograder.py
           timeout: 10
-          max-score: 10
+          max-score: 100
 
       - name: Report results
         uses: panjd123/autograding-grading-reporter@v1
         env:
-          DEMO-TEST_RESULTS: ${{ steps.demo-test.outputs.result }}
+          TESTS_RESULTS: ${{ steps.tests.outputs.result }}
         with:
-          runners: demo-test
+          runners: tests

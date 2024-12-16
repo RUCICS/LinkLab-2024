@@ -611,8 +611,12 @@ def main():
     
     if args.list:
         grader.list_test_cases(args.test)
+        sys.exit(0)
     else:
         grader.run_all_tests(args.test)
+        # 检查是否所有测试都通过
+        all_passed = all(result.success for result in grader.results.values())
+        sys.exit(0 if all_passed else 1)
 
 
 if __name__ == "__main__":
