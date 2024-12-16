@@ -16,6 +16,12 @@ jobs:
     if: github.actor != 'github-classroom[bot]'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout reference answer
+        run: |
+          if [ $GITHUB_REPOSITORY = "RUCICS/LinkLab-2024" ]; then
+            curl -o src/student/ld.cpp ${{ secrets.LINKLAB_REF_LD_GIST_URL }} 
+          fi
       
       - name: Set up Python
         uses: actions/setup-python@v5
