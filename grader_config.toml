@@ -1,5 +1,15 @@
 [setup]
 # 在运行测试之前需要执行的准备步骤
+
+[[setup.steps]]
+name = "Compile FLE Tools"
+type = "command"
+command = "make"
+args = ["all", "-j"]
+required = true                                     # 如果这一步失败，则终止所有测试
+message = "Preparing FLE Tools..."
+success_message = "FLE Tools compiled successfully"
+
 [[setup.steps]]
 name = "Compile minilibc"
 type = "compile"

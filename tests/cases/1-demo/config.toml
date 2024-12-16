@@ -8,10 +8,16 @@ name = "Compile foo.c"
 command = "${root_dir}/cc"
 args = ["${test_dir}/foo.c", "-o", "${build_dir}/foo.o", "-I${common_dir}"]
 
+[run.check]
+files = ["${build_dir}/foo.fle"]
+
 [[run]]
 name = "Compile main.c"
 command = "${root_dir}/cc"
 args = ["${test_dir}/main.c", "-o", "${build_dir}/main.o", "-I${common_dir}"]
+
+[run.check]
+files = ["${build_dir}/main.fle"]
 
 [[run]]
 name = "Link program"
@@ -23,6 +29,9 @@ args = [
     "-o",
     "${build_dir}/program",
 ]
+
+[run.check]
+files = ["${build_dir}/program"]
 
 [[run]]
 name = "Run program"

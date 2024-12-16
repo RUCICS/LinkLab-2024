@@ -137,6 +137,39 @@ class Grader:
                 self.console.print(f"[red]Error:[/red] Compilation failed: {str(e)}")
             return False
 
+    def _run_command_step(self, step: Dict[str, Any]) -> bool:
+        """运行命令类型的准备步骤"""
+        try:
+            cmd = [step["command"]]
+            if "args" in step:
+                if isinstance(step["args"], list):
+                    cmd.extend(step["args"])
+                else:
+                    cmd.append(step["args"])
+
+            process = subprocess.run(
+                cmd,
+                cwd=self.project_root,
+                capture_output=True,
+                text=True,
+                timeout=step.get("timeout", 5.0),
+            )
+
+            if process.returncode != 0:
+                if not self.json_output:
+                    self.console.print("[red]Error:[/red] Command failed:")
+                    self.console.print(process.stderr)
+                return False
+
+            if not self.json_output and "success_message" in step:
+                self.console.print(f"[green]✓[/green] {step['success_message']}")
+            return True
+
+        except Exception as e:
+            if not self.json_output:
+                self.console.print(f"[red]Error:[/red] Command failed: {str(e)}")
+            return False
+
     def load_test_cases(self, specific_test: Optional[str] = None) -> List[TestCase]:
         """加载测试用例，如果指定了特定测试，则只加载该测试"""
         if specific_test:
@@ -229,6 +262,13 @@ class Grader:
                 False,
                 f"Expected return code {check['return_code']}, got {return_code}",
             )
+
+        # 检查文件是否存在
+        if "files" in check:
+            for file_path in check["files"]:
+                resolved_path = Path(self._resolve_path(file_path, test_dir))
+                if not resolved_path.exists():
+                    return False, f"Required file '{file_path}' not found"
 
         # Special Judge
         if "special_judge" in check:
@@ -331,11 +371,13 @@ class Grader:
                     TextColumn("[progress.description]{task.description}"),
                     console=self.console,
                 ) as progress:
+                    total_steps = len(test.run_steps)
                     task = progress.add_task(
-                        f"Running {test.meta['name']}...", total=None
+                        f"Running {test.meta['name']} [0/{total_steps}]...",
+                        total=total_steps,
                     )
-                    result = self._execute_test_steps(test)
-                    progress.update(task, completed=True)
+                    result = self._execute_test_steps(test, progress, task)
+                    progress.update(task, completed=total_steps)
                     return result
             else:
                 # JSON模式下直接执行测试
@@ -356,11 +398,22 @@ class Grader:
                 score=0,
             )
 
-    def _execute_test_steps(self, test: TestCase) -> TestResult:
+    def _execute_test_steps(
+        self, test: TestCase, progress=None, task=None
+    ) -> TestResult:
         """执行测试步骤的具体逻辑"""
         start_time = time.time()
+        total_steps = len(test.run_steps)
 
-        for step in test.run_steps:
+        for i, step in enumerate(test.run_steps, 1):
+            if (progress is not None) and (task is not None):
+                step_name = step.get("name", step["command"])
+                progress.update(
+                    task,
+                    description=f"Running {test.meta['name']} [{i}/{total_steps}]: {step_name}",
+                    completed=i,
+                )
+
             # 处理命令和参数中的路径变量
             cmd = [self._resolve_path(step["command"], test.path)]
             args = []
@@ -403,7 +456,7 @@ class Grader:
                 if not success:
                     return TestResult(
                         success=False,
-                        message=f"Step '{step.get('name', cmd[0])}' failed: {message}",
+                        message=f"Step {i}/{total_steps} '{step.get('name', cmd[0])}' failed: {message}",
                         time=time.time() - start_time,
                         score=0,
                     )
