@@ -1,0 +1,34 @@
+[meta]
+name = "Hello World Test"
+description = "Test program output and return value"
+score = 10
+
+[[run]]
+name = "Compile foo.c"
+command = "${root_dir}/cc"
+args = ["${test_dir}/foo.c", "-o", "${build_dir}/foo.o", "-I${common_dir}"]
+
+[[run]]
+name = "Compile main.c"
+command = "${root_dir}/cc"
+args = ["${test_dir}/main.c", "-o", "${build_dir}/main.o", "-I${common_dir}"]
+
+[[run]]
+name = "Link program"
+command = "${root_dir}/ld"
+args = [
+    "${build_dir}/main.fle",
+    "${build_dir}/foo.fle",
+    "${common_dir}/minilibc.fle",
+    "-o",
+    "${build_dir}/program",
+]
+
+[[run]]
+name = "Run program"
+command = "${root_dir}/exec"
+args = ["${build_dir}/program"]
+
+[run.check]
+stdout = "ans.out"
+return_code = 42

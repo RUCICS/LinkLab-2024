@@ -1,0 +1,29 @@
+[setup]
+# 在运行测试之前需要执行的准备步骤
+[[setup.steps]]
+name = "Compile minilibc"
+type = "compile"
+source = "tests/common/minilibc.c"
+output = "tests/common/minilibc.o"
+compiler = "./cc"
+required = true                                    # 如果这一步失败，则终止所有测试
+message = "Preparing minilibc..."
+success_message = "minilibc compiled successfully"
+
+# 可以添加更多setup步骤
+# [[setup.steps]]
+# name = "其他准备步骤"
+# type = "command"  # 可以是普通命令
+# command = "./some_script.sh"
+# args = ["arg1", "arg2"]
+# required = false  # 这一步失败不会终止测试
+
+[paths]
+# 定义项目中重要路径的配置
+tests_dir = "tests"
+cases_dir = "tests/cases"
+common_dir = "tests/common"
+
+[grader]
+# 评分器的全局配置
+default_timeout = 5.0 # 默认超时时间（秒）
