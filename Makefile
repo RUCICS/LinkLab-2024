@@ -45,7 +45,7 @@ $(TOOLS): $(BASE_EXEC)
 
 # 编译源文件
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) -c -o $@ $< -g
 
 # 清理编译产物
 clean:

@@ -1,11 +1,12 @@
 #include "fle.hpp"
-#include "utils.hpp"
-#include <iostream>
 
-void FLE_nm(const std::vector<std::string>& files)
+void FLE_nm(const FLEObject& obj)
 {
-    // TODO: 实现符号表查看器
-    // 1. 读取FLE文件
-    // 2. 检查文件类型
-    // 3. 显示符号表信息
+    // TODO: Implement symbol table viewer
+    // Print all symbols in obj.symbols
+    // Format: <value> <type> <name>
+    // Example:
+    // 0000000000000000 T _start
+    // 0000000000000020 t helper_func
+    // 0000000000001000 D data_var
 }
