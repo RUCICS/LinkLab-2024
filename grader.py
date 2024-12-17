@@ -3,17 +3,19 @@ import re
 import subprocess
 import sys
 import time
+import venv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import tomli
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
-
-console = Console()
+try:
+    import tomli
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.table import Table
+except ImportError:
+    pass
 
 
 @dataclass
@@ -543,7 +545,7 @@ class Grader:
     def list_test_cases(self, specific_test: Optional[str] = None):
         """列出所有测试用例的信息而不执行它们"""
         test_cases = self.load_test_cases(specific_test)
-        
+
         if self.json_output:
             # JSON格式输出
             cases_info = [
@@ -551,7 +553,7 @@ class Grader:
                     "name": test.meta["name"],
                     "description": test.meta.get("description", "No description"),
                     "score": test.meta["score"],
-                    "path": str(test.path.name)
+                    "path": str(test.path.name),
                 }
                 for test in test_cases
             ]
@@ -569,7 +571,7 @@ class Grader:
                     test.meta["name"],
                     test.meta.get("description", "No description"),
                     f"{test.meta['score']:.1f}",
-                    str(test.path.name)
+                    str(test.path.name),
                 )
 
             self.console.print("\n[bold]Available Test Cases:[/bold]\n")
@@ -577,25 +579,51 @@ class Grader:
             self.console.print()
 
 
-def check_dependencies():
-    """Check if required dependencies are installed"""
+def create_venv(venv_path):
+    """创建虚拟环境"""
+    print("Creating virtual environment...", flush=True)
+    venv.create(venv_path, with_pip=True)
+
+
+def install_requirements(venv_path):
+    """安装依赖"""
+    pip_path = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
+    requirements_path = Path(__file__).parent / "requirements.txt"
+
+    print("Installing dependencies...", flush=True)
+    subprocess.run([str(pip_path), "install", "-r", str(requirements_path)], check=True)
+
+
+def ensure_venv():
+    """确保虚拟环境存在并安装了所有依赖"""
     try:
         import rich
         import tomli
-    except ImportError as e:
-        print(
-            f"Error: Missing required dependencies. Please use run_grader.py to run this script.\nDetails: {str(e)}",
-            file=sys.stderr,
+
+        return True
+    except ImportError:
+        venv_dir = Path(__file__).parent / ".venv"
+        python_path = (
+            venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
         )
-        sys.exit(1)
+
+        # 如果虚拟环境不存在，创建它并安装依赖
+        if not venv_dir.exists():
+            create_venv(venv_dir)
+            install_requirements(venv_dir)
+
+        # 在虚拟环境中重新运行当前脚本
+        subprocess.run([str(python_path), __file__] + sys.argv[1:])
+        return False
 
 
 def main():
     """主函数"""
-    import argparse
+    # 首先确保在正确的环境中运行
+    if not ensure_venv():
+        return
 
-    # 添加依赖检查
-    check_dependencies()
+    import argparse
 
     parser = argparse.ArgumentParser(description="Grade student submissions")
     parser.add_argument(
@@ -605,31 +633,44 @@ def main():
         "--list", action="store_true", help="List all test cases without running them"
     )
     parser.add_argument(
-        "--write-result", action="store_true", 
-        help="Write percentage score to .autograder_result file"
+        "--write-result",
+        action="store_true",
+        help="Write percentage score to .autograder_result file",
     )
     parser.add_argument("test", nargs="?", help="Specific test to run")
     args = parser.parse_args()
 
-    grader = Grader(json_output=args.json)
-    
-    if args.list:
-        grader.list_test_cases(args.test)
-        sys.exit(0)
-    else:
-        grader.run_all_tests(args.test)
-        # 检查是否所有测试都通过
-        all_passed = all(result.success for result in grader.results.values())
-        
-        # 如果需要写入结果文件
-        if args.write_result:
-            total_score = sum(result.score for result in grader.results.values())
-            max_score = sum(test.meta["score"] for test in grader.load_test_cases(args.test))
-            percentage = (total_score / max_score * 100) if max_score > 0 else 0
-            with open(".autograder_result", "w") as f:
-                f.write(str(percentage))
-        
-        sys.exit(0 if all_passed else 1)
+    try:
+        grader = Grader(json_output=args.json)
+
+        if args.list:
+            grader.list_test_cases(args.test)
+            sys.exit(0)
+        else:
+            grader.run_all_tests(args.test)
+            # 检查是否所有测试都通过
+            all_passed = all(result.success for result in grader.results.values())
+
+            # 如果需要写入结果文件
+            if args.write_result:
+                total_score = sum(result.score for result in grader.results.values())
+                max_score = sum(
+                    test.meta["score"] for test in grader.load_test_cases(args.test)
+                )
+                percentage = (total_score / max_score * 100) if max_score > 0 else 0
+                with open(".autograder_result", "w") as f:
+                    f.write(str(percentage))
+
+            sys.exit(0 if all_passed else 1)
+    except subprocess.CalledProcessError as e:
+        print(
+            f"Error: Command execution failed with return code {e.returncode}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
