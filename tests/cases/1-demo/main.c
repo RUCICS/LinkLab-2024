@@ -9,14 +9,15 @@ extern char msg[];
 // External function
 int foo();
 
-int main() {
-  // Pointers
-  const char *p = msg;
+int main()
+{
+    // Pointers
+    const char* p = msg;
 
-  // Function calls
-  for (int i = 0; i < foo(); i++) {
-    print("Message: ", p, NULL);
-  }
+    // Function calls
+    for (int i = 0; i < foo(); i++) {
+        print("Message: ", p, NULL);
+    }
 
-  return 42;
+    return 42;
 }

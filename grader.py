@@ -543,7 +543,7 @@ class Grader:
     def list_test_cases(self, specific_test: Optional[str] = None):
         """列出所有测试用例的信息而不执行它们"""
         test_cases = self.load_test_cases(specific_test)
-        
+
         if self.json_output:
             # JSON格式输出
             cases_info = [
@@ -551,7 +551,7 @@ class Grader:
                     "name": test.meta["name"],
                     "description": test.meta.get("description", "No description"),
                     "score": test.meta["score"],
-                    "path": str(test.path.name)
+                    "path": str(test.path.name),
                 }
                 for test in test_cases
             ]
@@ -569,7 +569,7 @@ class Grader:
                     test.meta["name"],
                     test.meta.get("description", "No description"),
                     f"{test.meta['score']:.1f}",
-                    str(test.path.name)
+                    str(test.path.name),
                 )
 
             self.console.print("\n[bold]Available Test Cases:[/bold]\n")
@@ -608,7 +608,7 @@ def main():
     args = parser.parse_args()
 
     grader = Grader(json_output=args.json)
-    
+
     if args.list:
         grader.list_test_cases(args.test)
         sys.exit(0)
