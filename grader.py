@@ -604,6 +604,10 @@ def main():
     parser.add_argument(
         "--list", action="store_true", help="List all test cases without running them"
     )
+    parser.add_argument(
+        "--write-result", action="store_true", 
+        help="Write percentage score to .autograder_result file"
+    )
     parser.add_argument("test", nargs="?", help="Specific test to run")
     args = parser.parse_args()
 
@@ -616,6 +620,15 @@ def main():
         grader.run_all_tests(args.test)
         # 检查是否所有测试都通过
         all_passed = all(result.success for result in grader.results.values())
+        
+        # 如果需要写入结果文件
+        if args.write_result:
+            total_score = sum(result.score for result in grader.results.values())
+            max_score = sum(test.meta["score"] for test in grader.load_test_cases(args.test))
+            percentage = (total_score / max_score * 100) if max_score > 0 else 0
+            with open(".autograder_result", "w") as f:
+                f.write(str(percentage))
+        
         sys.exit(0 if all_passed else 1)
 
 
