@@ -59,6 +59,52 @@ void print(const char* s, ...)
     va_end(ap);
 }
 
+int sprintf(char* buf, const char* fmt, ...)
+{
+    char* p = buf;
+    va_list ap;
+    va_start(ap, fmt);
+
+    while (*fmt) {
+        if (*fmt == '%') {
+            fmt++;
+            switch (*fmt) {
+            case 'd': {
+                int val = va_arg(ap, int);
+                if (val < 0) {
+                    *p++ = '-';
+                    val = -val;
+                }
+
+                // 转换整数到字符串
+                char tmp[32];
+                char* t = tmp;
+                do {
+                    *t++ = '0' + (val % 10);
+                    val /= 10;
+                } while (val);
+
+                // 反转数字
+                while (t > tmp) {
+                    *p++ = *--t;
+                }
+                break;
+            }
+            default:
+                *p++ = *fmt;
+                break;
+            }
+        } else {
+            *p++ = *fmt;
+        }
+        fmt++;
+    }
+
+    *p = '\0';
+    va_end(ap);
+    return p - buf;
+}
+
 int main();
 
 // libc provides the "_start".
