@@ -21,13 +21,6 @@ void FLE_exec(const FLEObject& obj)
     const auto& load_section = obj.sections.at(".load");
     const auto& data = load_section.data;
 
-    auto start_it = std::find_if(load_section.symbols.begin(), load_section.symbols.end(), [](const Symbol& s) {
-        return s.name == "_start";
-    });
-    if (start_it == load_section.symbols.end()) {
-        throw std::runtime_error("No _start symbol found.");
-    }
-
     size_t size = data.size();
     void* mem = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -38,8 +31,7 @@ void FLE_exec(const FLEObject& obj)
     memcpy(mem, data.data(), size);
 
     using FuncType = int (*)();
-    FuncType func = reinterpret_cast<FuncType>(
-        static_cast<uint8_t*>(mem) + start_it->offset);
+    FuncType func = reinterpret_cast<FuncType>(static_cast<uint8_t*>(mem) + obj.entry);
 
     func(); // NoReturn
 
