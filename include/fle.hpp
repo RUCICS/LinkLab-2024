@@ -12,7 +12,6 @@ using json = nlohmann::ordered_json;
 enum class RelocationType {
     R_X86_64_32, // 32位绝对寻址
     R_X86_64_PC32, // 32位相对寻址
-    R_X86_64_PLT32 // PLT重定位
 };
 
 // 重定位项
@@ -45,6 +44,7 @@ struct FLESection {
 };
 
 struct FLEObject {
+    std::string name; // object name
     std::string type; // ".obj" or ".exe"
     std::map<std::string, FLESection> sections; // Section name -> section data
     std::vector<Symbol> symbols; // Global symbol table

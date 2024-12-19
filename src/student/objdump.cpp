@@ -14,7 +14,7 @@ void FLE_objdump(const FLEObject& obj, FLEWriter& writer)
         // 收集所有断点（符号和重定位的位置）
         std::vector<size_t> breaks;
         for (const auto& sym : obj.symbols) {
-            if (sym.section == name) {  // only collect symbols for current section
+            if (sym.section == name) { // only collect symbols for current section
                 breaks.push_back(sym.offset);
             }
         }
@@ -48,7 +48,7 @@ void FLE_objdump(const FLEObject& obj, FLEWriter& writer)
             for (const auto& reloc : section.relocs) {
                 if (reloc.offset == pos) {
                     std::string reloc_format;
-                    if (reloc.type == RelocationType::R_X86_64_PLT32 || reloc.type == RelocationType::R_X86_64_PC32) {
+                    if (reloc.type == RelocationType::R_X86_64_PC32) {
                         reloc_format = ".rel";
                     } else if (reloc.type == RelocationType::R_X86_64_32) {
                         reloc_format = ".abs";

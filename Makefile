@@ -1,3 +1,7 @@
+# 1. 现在似乎改了fle.hpp，make tests不会自动识别病编译exec.cpp
+# 2. 编译选项是否应该和原有jyy的一致 -Os -g？
+
+
 CXX = g++
 CXXFLAGS = -std=c++20 -Wall -Wextra -I./include
 REQUIRED_CXX_STANDARD = 20

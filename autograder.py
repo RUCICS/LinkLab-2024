@@ -8,7 +8,7 @@ from rich.panel import Panel
 
 def run_grader():
     """运行grader并获取结果"""
-    with open(".autograder_result", "w", encoding="utf-8") as f:
+    with open(".autograder_result", "w") as f:
         f.write(str(0))
 
     try:
@@ -59,7 +59,7 @@ def run_grader():
             final_score = 0
 
         # 写入分数到.autograder_result文件
-        with open(".autograder_result", "w", encoding="utf-8") as f:
+        with open(".autograder_result", "w") as f:
             f.write(str(final_score))
 
         # 保持与grader.py相同的退出代码
@@ -67,7 +67,7 @@ def run_grader():
 
     except Exception as e:
         print(f"Error running grader: {str(e)}", file=sys.stderr)
-        with open(".autograder_result", "w", encoding="utf-8") as f:
+        with open(".autograder_result", "w") as f:
             f.write("0")
         sys.exit(1)
 

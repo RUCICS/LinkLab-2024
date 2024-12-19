@@ -20,7 +20,7 @@ FLEObject load_fle(const std::string& file)
 
     json j = json::parse(content);
     FLEObject obj;
-
+    obj.name = get_basename(file);
     obj.type = j["type"].get<std::string>();
 
     // 如果是可执行文件，读取入口点
@@ -38,16 +38,21 @@ FLEObject load_fle(const std::string& file)
         // 处理段的内容
         for (const auto& line : value) {
             std::string line_str = line.get<std::string>();
-            if (line_str.substr(0, 5) == "🔢:") {
+
+            size_t colon_pos = line_str.find(':');
+            std::string prefix = line_str.substr(0, colon_pos);
+            std::string content = line_str.substr(colon_pos + 1);
+
+            if (prefix == "🔢") {
                 // 处理数据
-                std::stringstream ss(line_str.substr(5));
+                std::stringstream ss(content);
                 uint32_t byte;
                 while (ss >> std::hex >> byte) {
                     section.data.push_back(static_cast<uint8_t>(byte));
                 }
-            } else if (line_str.substr(0, 5) == "🏷️:") {
+            } else if (prefix == "🏷️") {
                 // 处理局部符号
-                std::string name = line_str.substr(5);
+                std::string name = content;
                 Symbol sym {
                     SymbolType::LOCAL,
                     std::string(key),
@@ -56,9 +61,9 @@ FLEObject load_fle(const std::string& file)
                 };
                 std::cerr << "Loading symbol: " << sym.name << " in section " << sym.section << " at offset " << sym.offset << std::endl;
                 obj.symbols.push_back(sym);
-            } else if (line_str.substr(0, 5) == "📎:") {
+            } else if (prefix == "📎") {
                 // 处理弱全局符号
-                std::string name = line_str.substr(5);
+                std::string name = content;
                 Symbol sym {
                     SymbolType::WEAK,
                     std::string(key),
@@ -66,9 +71,9 @@ FLEObject load_fle(const std::string& file)
                     trim(name)
                 };
                 obj.symbols.push_back(sym);
-            } else if (line_str.substr(0, 5) == "📤:") {
+            } else if (prefix == "📤") {
                 // 处理强全局符号
-                std::string name = line_str.substr(5);
+                std::string name = content;
                 Symbol sym {
                     SymbolType::GLOBAL,
                     std::string(key),
@@ -76,30 +81,28 @@ FLEObject load_fle(const std::string& file)
                     trim(name)
                 };
                 obj.symbols.push_back(sym);
-            } else if (line_str.substr(0, 5) == "❓:") {
+            } else if (prefix == "❓") {
                 // 处理重定位
-                std::string reloc_str = line_str.substr(5);
-                std::regex reloc_pattern(R"(\.rela\((.*?),\s*0x([0-9a-fA-F]+)\))");
+                std::string reloc_str = trim(content);
+                std::regex reloc_pattern(R"(\.(rel|abs)\((\w+)\s*[-+]\s*(\d+)\))");
                 std::smatch match;
 
-                if (std::regex_match(reloc_str, match, reloc_pattern)) {
-                    Relocation reloc;
-                    reloc.offset = section.data.size();
-                    reloc.symbol = match[1].str();
-                    reloc.addend = std::stoi(match[2].str(), nullptr, 16);
+                if (!std::regex_match(reloc_str, match, reloc_pattern)) {
+                    throw std::runtime_error("Invalid relocation: " + reloc_str);
+                }
 
-                    // 根据上下文确定重定位类型
-                    if (reloc_str.find("R_X86_64_32") != std::string::npos) {
-                        reloc.type = RelocationType::R_X86_64_32;
-                    } else if (reloc_str.find("R_X86_64_PC32") != std::string::npos) {
-                        reloc.type = RelocationType::R_X86_64_PC32;
-                    } else if (reloc_str.find("R_X86_64_PLT32") != std::string::npos) {
-                        reloc.type = RelocationType::R_X86_64_PLT32;
-                    } else {
-                        throw std::runtime_error("Unknown relocation type: " + reloc_str);
-                    }
+                Relocation reloc {
+                    (match[1].str() == "rel") ? RelocationType::R_X86_64_PC32 : RelocationType::R_X86_64_32,
+                    section.data.size(),
+                    match[2].str(),
+                    std::stoi(match[3].str())
+                };
 
-                    section.relocs.push_back(reloc);
+                section.relocs.push_back(reloc);
+
+                // Assume 4 bytes per instruction
+                for (size_t i = 0; i < 4; ++i) {
+                    section.data.push_back(0);
                 }
             }
         }

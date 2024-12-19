@@ -16,6 +16,7 @@ type = "compile"
 source = "tests/common/minilibc.c"
 output = "tests/common/minilibc.o"
 compiler = "./cc"
+args = ["-g", "-Os"]
 required = true                                    # 如果这一步失败，则终止所有测试
 message = "Preparing minilibc..."
 success_message = "minilibc compiled successfully"
