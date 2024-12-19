@@ -40,7 +40,7 @@ jobs:
           test-name: tests
           setup-command: |
             make all
-          command: python3 autograder.py
+          command: python3 grader.py --write-result
           timeout: 10
           max-score: 100
 

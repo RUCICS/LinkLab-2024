@@ -3,17 +3,19 @@ import re
 import subprocess
 import sys
 import time
+import venv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import tomli
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
-
-console = Console()
+try:
+    import tomli
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.table import Table
+except ImportError:
+    pass
 
 
 @dataclass
@@ -22,6 +24,7 @@ class TestResult:
     message: str
     time: float
     score: float
+    error_details: Optional[Dict[str, Any]] = None
 
     # 添加to_dict方法便于JSON序列化
     def to_dict(self):
@@ -30,6 +33,7 @@ class TestResult:
             "message": self.message,
             "time": self.time,
             "score": self.score,
+            "error_details": self.error_details,
         }
 
 
@@ -87,59 +91,13 @@ class Grader:
             self.console.print(f"[bold]{step['message']}[/bold]")
 
         try:
-            if step["type"] == "compile":
-                return self._run_compile_step(step)
-            elif step["type"] == "command":
-                return self._run_command_step(step)
-            else:
+            if step["type"] != "command":
                 if not self.json_output:
                     self.console.print(
                         f"[red]Error:[/red] Unknown setup step type: {step['type']}"
                     )
                 return False
-        except Exception as e:
-            if not self.json_output:
-                self.console.print(f"[red]Error:[/red] Setup step failed: {str(e)}")
-            else:
-                print(f"Error: Setup step failed: {str(e)}", file=sys.stderr)
-            return False
 
-    def _run_compile_step(self, step: Dict[str, Any]) -> bool:
-        """运行编译类型的准备步骤"""
-        source = self.project_root / step["source"]
-        output = self.project_root / step["output"]
-
-        if not source.exists():
-            if not self.json_output:
-                self.console.print(
-                    f"[red]Error:[/red] Source file {step['source']} not found"
-                )
-            return False
-
-        try:
-            cmd = [step["compiler"], str(source), "-o", str(output)]
-            process = subprocess.run(
-                cmd, cwd=self.project_root, capture_output=True, text=True
-            )
-
-            if process.returncode != 0:
-                if not self.json_output:
-                    self.console.print("[red]Error:[/red] Compilation failed:")
-                    self.console.print(process.stderr)
-                return False
-
-            if not self.json_output and "success_message" in step:
-                self.console.print(f"[green]✓[/green] {step['success_message']}")
-            return True
-
-        except Exception as e:
-            if not self.json_output:
-                self.console.print(f"[red]Error:[/red] Compilation failed: {str(e)}")
-            return False
-
-    def _run_command_step(self, step: Dict[str, Any]) -> bool:
-        """运行命令类型的准备步骤"""
-        try:
             cmd = [step["command"]]
             if "args" in step:
                 if isinstance(step["args"], list):
@@ -434,6 +392,9 @@ class Grader:
                 with open(stdin_file) as f:
                     stdin_data = f.read()
 
+            # 构建完整命令字符串用于调试
+            full_cmd = " ".join([cmd[0]] + args)
+
             # 运行命令
             process = subprocess.run(
                 cmd + args,
@@ -454,11 +415,22 @@ class Grader:
                     test.path,
                 )
                 if not success:
+                    error_message = f"Step {i}/{total_steps} '{step.get('name', cmd[0])}' failed: {message}"
+                    error_details = {
+                        "step": i,
+                        "step_name": step.get("name", cmd[0]),
+                        "command": full_cmd,
+                        "stdout": process.stdout,
+                        "stderr": process.stderr,
+                        "return_code": process.returncode,
+                        "error_message": message,
+                    }
                     return TestResult(
                         success=False,
-                        message=f"Step {i}/{total_steps} '{step.get('name', cmd[0])}' failed: {message}",
+                        message=error_message,
                         time=time.time() - start_time,
                         score=0,
+                        error_details=error_details,
                     )
 
         return TestResult(
@@ -466,6 +438,7 @@ class Grader:
             message="All steps completed successfully",
             time=time.time() - start_time,
             score=test.meta["score"],
+            error_details=None,
         )
 
     def run_all_tests(self, specific_test: Optional[str] = None):
@@ -482,10 +455,29 @@ class Grader:
         total_score = 0
         max_score = 0
         test_results = []
+        failed_tests_details = []  # 用于存储失败测试的详细信息
 
         for test in test_cases:
             result = self.run_test(test)
             self.results[test.path.name] = result
+
+            # 如果测试失败，保存更详细的错误信息
+            if not result.success:
+                error_info = {
+                    "name": test.meta["name"],
+                    "details": result.message,
+                }
+                if result.error_details:
+                    error_info.update(
+                        {
+                            "step": result.error_details["step"],
+                            "step_name": result.error_details["step_name"],
+                            "command": result.error_details["command"],
+                            "stdout": result.error_details["stdout"],
+                            "stderr": result.error_details["stderr"],
+                        }
+                    )
+                failed_tests_details.append(error_info)
 
             test_results.append(
                 {
@@ -495,6 +487,7 @@ class Grader:
                     "score": result.score,
                     "max_score": test.meta["score"],
                     "message": result.message,
+                    "error_details": result.error_details,  # 在JSON输出中也包含错误详情
                 }
             )
 
@@ -502,7 +495,7 @@ class Grader:
             max_score += test.meta["score"]
 
         if self.json_output:
-            # 输出JSON格式结果
+            # JSON输出保持不变
             json_result = {
                 "total_score": round(total_score, 1),
                 "max_score": round(max_score, 1),
@@ -511,7 +504,7 @@ class Grader:
             }
             print(json.dumps(json_result, ensure_ascii=False))
         else:
-            # 原有的表格输出逻辑保持不变
+            # 表格输出
             table = Table(show_header=True, header_style="bold")
             table.add_column("Test Case", style="cyan")
             table.add_column("Result", justify="center")
@@ -519,7 +512,6 @@ class Grader:
             table.add_column("Score", justify="right")
             table.add_column("Message")
 
-            # 使用已经运行的测试结果，而不是重新运行测试
             for test, result in zip(test_cases, test_results):
                 table.add_row(
                     test.meta["name"],
@@ -530,6 +522,28 @@ class Grader:
                 )
 
             self.console.print(table)
+
+            # 修改失败测试的详细信息显示
+            if not self.json_output and failed_tests_details:
+                self.console.print("\n[bold red]Failed Tests Details:[/bold red]")
+                for failed_test in failed_tests_details:
+                    self.console.print(f"\n[bold]{failed_test['name']}:[/bold]")
+                    self.console.print(f"Error: {failed_test['details']}")
+
+                    # 如果有更详细的错误信息，显示它们
+                    if "command" in failed_test:
+                        # 简化命令输出，将绝对路径转换为相对路径
+                        simplified_command = failed_test["command"].replace(
+                            str(self.project_root) + "/", "./"
+                        )
+                        self.console.print(f"Command: {simplified_command}")
+
+                        if failed_test["stdout"].strip():
+                            self.console.print("\n[yellow]Standard Output:[/yellow]")
+                            self.console.print(failed_test["stdout"])
+                        if failed_test["stderr"].strip():
+                            self.console.print("\n[red]Standard Error:[/red]")
+                            self.console.print(failed_test["stderr"])
 
             summary = Panel(
                 f"[bold]Total Score: {total_score:.1f}/{max_score:.1f} "
@@ -577,25 +591,51 @@ class Grader:
             self.console.print()
 
 
-def check_dependencies():
-    """Check if required dependencies are installed"""
+def create_venv(venv_path):
+    """创建虚拟环境"""
+    print("Creating virtual environment...", flush=True)
+    venv.create(venv_path, with_pip=True)
+
+
+def install_requirements(venv_path):
+    """安装依赖"""
+    pip_path = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
+    requirements_path = Path(__file__).parent / "requirements.txt"
+
+    print("Installing dependencies...", flush=True)
+    subprocess.run([str(pip_path), "install", "-r", str(requirements_path)], check=True)
+
+
+def ensure_venv():
+    """确保虚拟环境存在并安装了所有依赖"""
     try:
         import rich
         import tomli
-    except ImportError as e:
-        print(
-            f"Error: Missing required dependencies. Please use run_grader.py to run this script.\nDetails: {str(e)}",
-            file=sys.stderr,
+
+        return True
+    except ImportError:
+        venv_dir = Path(__file__).parent / ".venv"
+        python_path = (
+            venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
         )
-        sys.exit(1)
+
+        # 如果虚拟环境不存在，创建它并安装依赖
+        if not venv_dir.exists():
+            create_venv(venv_dir)
+            install_requirements(venv_dir)
+
+        # 在虚拟环境中重新运行当前脚本
+        subprocess.run([str(python_path), __file__] + sys.argv[1:])
+        return False
 
 
 def main():
     """主函数"""
-    import argparse
+    # 首先确保在正确的环境中运行
+    if not ensure_venv():
+        return
 
-    # 添加依赖检查
-    check_dependencies()
+    import argparse
 
     parser = argparse.ArgumentParser(description="Grade student submissions")
     parser.add_argument(
@@ -603,6 +643,11 @@ def main():
     )
     parser.add_argument(
         "--list", action="store_true", help="List all test cases without running them"
+    )
+    parser.add_argument(
+        "--write-result",
+        action="store_true",
+        help="Write percentage score to .autograder_result file",
     )
     parser.add_argument("test", nargs="?", help="Specific test to run")
     args = parser.parse_args()
@@ -617,6 +662,37 @@ def main():
         # 检查是否所有测试都通过
         all_passed = all(result.success for result in grader.results.values())
         sys.exit(0 if all_passed else 1)
+    try:
+        grader = Grader(json_output=args.json)
+
+        if args.list:
+            grader.list_test_cases(args.test)
+            sys.exit(0)
+        else:
+            grader.run_all_tests(args.test)
+            # 检查是否所有测试都通过
+            all_passed = all(result.success for result in grader.results.values())
+
+            # 如果需要写入结果文件
+            if args.write_result:
+                total_score = sum(result.score for result in grader.results.values())
+                max_score = sum(
+                    test.meta["score"] for test in grader.load_test_cases(args.test)
+                )
+                percentage = (total_score / max_score * 100) if max_score > 0 else 0
+                with open(".autograder_result", "w") as f:
+                    f.write(str(percentage))
+
+            sys.exit(0 if all_passed else 1)
+    except subprocess.CalledProcessError as e:
+        print(
+            f"Error: Command execution failed with return code {e.returncode}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
