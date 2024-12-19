@@ -148,15 +148,15 @@ int main(int argc, char* argv[])
             }
             FLE_exec(load_fle(args[0]));
         } else if (tool == "FLE_ld") {
-            std::string outfile = "a.out.fle";
+            std::string outfile = "a.out";
             std::vector<std::string> input_files;
 
             for (size_t i = 0; i < args.size(); ++i) {
                 if (args[i] == "-o" && i + 1 < args.size()) {
                     outfile = args[++i];
-                    if (!outfile.ends_with(".fle")) {
-                        outfile += ".fle";
-                    }
+                    // if (!outfile.ends_with(".fle")) {
+                    //     outfile += ".fle";
+                    // }
                 } else {
                     input_files.push_back(args[i]);
                 }
