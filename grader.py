@@ -24,6 +24,7 @@ class TestResult:
     message: str
     time: float
     score: float
+    error_details: Optional[Dict[str, Any]] = None
 
     # 添加to_dict方法便于JSON序列化
     def to_dict(self):
@@ -32,6 +33,7 @@ class TestResult:
             "message": self.message,
             "time": self.time,
             "score": self.score,
+            "error_details": self.error_details,
         }
 
 
@@ -89,59 +91,13 @@ class Grader:
             self.console.print(f"[bold]{step['message']}[/bold]")
 
         try:
-            if step["type"] == "compile":
-                return self._run_compile_step(step)
-            elif step["type"] == "command":
-                return self._run_command_step(step)
-            else:
+            if step["type"] != "command":
                 if not self.json_output:
                     self.console.print(
                         f"[red]Error:[/red] Unknown setup step type: {step['type']}"
                     )
                 return False
-        except Exception as e:
-            if not self.json_output:
-                self.console.print(f"[red]Error:[/red] Setup step failed: {str(e)}")
-            else:
-                print(f"Error: Setup step failed: {str(e)}", file=sys.stderr)
-            return False
 
-    def _run_compile_step(self, step: Dict[str, Any]) -> bool:
-        """运行编译类型的准备步骤"""
-        source = self.project_root / step["source"]
-        output = self.project_root / step["output"]
-
-        if not source.exists():
-            if not self.json_output:
-                self.console.print(
-                    f"[red]Error:[/red] Source file {step['source']} not found"
-                )
-            return False
-
-        try:
-            cmd = [step["compiler"], str(source), "-o", str(output)]
-            process = subprocess.run(
-                cmd, cwd=self.project_root, capture_output=True, text=True
-            )
-
-            if process.returncode != 0:
-                if not self.json_output:
-                    self.console.print("[red]Error:[/red] Compilation failed:")
-                    self.console.print(process.stderr)
-                return False
-
-            if not self.json_output and "success_message" in step:
-                self.console.print(f"[green]✓[/green] {step['success_message']}")
-            return True
-
-        except Exception as e:
-            if not self.json_output:
-                self.console.print(f"[red]Error:[/red] Compilation failed: {str(e)}")
-            return False
-
-    def _run_command_step(self, step: Dict[str, Any]) -> bool:
-        """运行命令类型的准备步骤"""
-        try:
             cmd = [step["command"]]
             if "args" in step:
                 if isinstance(step["args"], list):
@@ -436,6 +392,9 @@ class Grader:
                 with open(stdin_file) as f:
                     stdin_data = f.read()
 
+            # 构建完整命令字符串用于调试
+            full_cmd = " ".join([cmd[0]] + args)
+
             # 运行命令
             process = subprocess.run(
                 cmd + args,
@@ -456,11 +415,22 @@ class Grader:
                     test.path,
                 )
                 if not success:
+                    error_message = f"Step {i}/{total_steps} '{step.get('name', cmd[0])}' failed: {message}"
+                    error_details = {
+                        "step": i,
+                        "step_name": step.get("name", cmd[0]),
+                        "command": full_cmd,
+                        "stdout": process.stdout,
+                        "stderr": process.stderr,
+                        "return_code": process.returncode,
+                        "error_message": message,
+                    }
                     return TestResult(
                         success=False,
-                        message=f"Step {i}/{total_steps} '{step.get('name', cmd[0])}' failed: {message}",
+                        message=error_message,
                         time=time.time() - start_time,
                         score=0,
+                        error_details=error_details,
                     )
 
         return TestResult(
@@ -468,6 +438,7 @@ class Grader:
             message="All steps completed successfully",
             time=time.time() - start_time,
             score=test.meta["score"],
+            error_details=None,
         )
 
     def run_all_tests(self, specific_test: Optional[str] = None):
@@ -484,10 +455,29 @@ class Grader:
         total_score = 0
         max_score = 0
         test_results = []
+        failed_tests_details = []  # 用于存储失败测试的详细信息
 
         for test in test_cases:
             result = self.run_test(test)
             self.results[test.path.name] = result
+
+            # 如果测试失败，保存更详细的错误信息
+            if not result.success:
+                error_info = {
+                    "name": test.meta["name"],
+                    "details": result.message,
+                }
+                if result.error_details:
+                    error_info.update(
+                        {
+                            "step": result.error_details["step"],
+                            "step_name": result.error_details["step_name"],
+                            "command": result.error_details["command"],
+                            "stdout": result.error_details["stdout"],
+                            "stderr": result.error_details["stderr"],
+                        }
+                    )
+                failed_tests_details.append(error_info)
 
             test_results.append(
                 {
@@ -497,6 +487,7 @@ class Grader:
                     "score": result.score,
                     "max_score": test.meta["score"],
                     "message": result.message,
+                    "error_details": result.error_details,  # 在JSON输出中也包含错误详情
                 }
             )
 
@@ -504,7 +495,7 @@ class Grader:
             max_score += test.meta["score"]
 
         if self.json_output:
-            # 输出JSON格式结果
+            # JSON输出保持不变
             json_result = {
                 "total_score": round(total_score, 1),
                 "max_score": round(max_score, 1),
@@ -513,7 +504,7 @@ class Grader:
             }
             print(json.dumps(json_result, ensure_ascii=False))
         else:
-            # 原有的表格输出逻辑保持不变
+            # 表格输出
             table = Table(show_header=True, header_style="bold")
             table.add_column("Test Case", style="cyan")
             table.add_column("Result", justify="center")
@@ -521,7 +512,6 @@ class Grader:
             table.add_column("Score", justify="right")
             table.add_column("Message")
 
-            # 使用已经运行的测试结果，而不是重新运行测试
             for test, result in zip(test_cases, test_results):
                 table.add_row(
                     test.meta["name"],
@@ -532,6 +522,28 @@ class Grader:
                 )
 
             self.console.print(table)
+
+            # 修改失败测试的详细信息显示
+            if not self.json_output and failed_tests_details:
+                self.console.print("\n[bold red]Failed Tests Details:[/bold red]")
+                for failed_test in failed_tests_details:
+                    self.console.print(f"\n[bold]{failed_test['name']}:[/bold]")
+                    self.console.print(f"Error: {failed_test['details']}")
+
+                    # 如果有更详细的错误信息，显示它们
+                    if "command" in failed_test:
+                        # 简化命令输出，将绝对路径转换为相对路径
+                        simplified_command = failed_test["command"].replace(
+                            str(self.project_root) + "/", "./"
+                        )
+                        self.console.print(f"Command: {simplified_command}")
+
+                        if failed_test["stdout"].strip():
+                            self.console.print("\n[yellow]Standard Output:[/yellow]")
+                            self.console.print(failed_test["stdout"])
+                        if failed_test["stderr"].strip():
+                            self.console.print("\n[red]Standard Error:[/red]")
+                            self.console.print(failed_test["stderr"])
 
             summary = Panel(
                 f"[bold]Total Score: {total_score:.1f}/{max_score:.1f} "

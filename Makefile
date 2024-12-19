@@ -54,11 +54,11 @@ clean:
 
 # 运行测试
 test: all
-	python3 run_grader.py
+	python3 grader.py
 
 # 运行特定测试
 test_%: all
 	@echo "Running test $*..."
-	python3 run_grader.py $*
+	python3 grader.py $*
 
 .PHONY: all clean test check_compiler
