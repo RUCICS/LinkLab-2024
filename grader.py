@@ -311,7 +311,7 @@ class Grader:
 
     def run_test(self, test: TestCase) -> TestResult:
         """运行单个测试用例"""
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         try:
             # 清理和创建构建目录
@@ -345,14 +345,14 @@ class Grader:
             return TestResult(
                 success=False,
                 message="Timeout",
-                time=time.time() - start_time,
+                time=time.perf_counter() - start_time,
                 score=0,
             )
         except Exception as e:
             return TestResult(
                 success=False,
                 message=f"Error: {str(e)}",
-                time=time.time() - start_time,
+                time=time.perf_counter() - start_time,
                 score=0,
             )
 
@@ -360,7 +360,7 @@ class Grader:
         self, test: TestCase, progress=None, task=None
     ) -> TestResult:
         """执行测试步骤的具体逻辑"""
-        start_time = time.time()
+        start_time = time.perf_counter()
         total_steps = len(test.run_steps)
 
         for i, step in enumerate(test.run_steps, 1):
@@ -386,7 +386,7 @@ class Grader:
                     return TestResult(
                         success=False,
                         message=f"Input file {step['stdin']} not found",
-                        time=time.time() - start_time,
+                        time=time.perf_counter() - start_time,
                         score=0,
                     )
                 with open(stdin_file) as f:
@@ -428,7 +428,7 @@ class Grader:
                     return TestResult(
                         success=False,
                         message=error_message,
-                        time=time.time() - start_time,
+                        time=time.perf_counter() - start_time,
                         score=0,
                         error_details=error_details,
                     )
@@ -436,7 +436,7 @@ class Grader:
         return TestResult(
             success=True,
             message="All steps completed successfully",
-            time=time.time() - start_time,
+            time=time.perf_counter() - start_time,
             score=test.meta["score"],
             error_details=None,
         )
