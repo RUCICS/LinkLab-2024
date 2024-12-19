@@ -207,6 +207,11 @@ int main(int argc, char* argv[])
             out << j.dump(4) << std::endl;
         } else if (tool == "FLE_cc") {
             FLE_cc(args);
+        } else if (tool == "FLE_readfle") {
+            if (args.size() != 1) {
+                throw std::runtime_error("Usage: readfle <input.fle>");
+            }
+            FLE_readfle(load_fle(args[0]));
         } else {
             std::cerr << "Unknown tool: " << tool << std::endl;
             return 1;

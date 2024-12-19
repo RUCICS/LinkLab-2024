@@ -141,3 +141,5 @@ void FLE_exec(const FLEObject& obj);
  * 3. Process relocations
  */
 FLEObject FLE_ld(const std::vector<FLEObject>& objects);
+
+void FLE_readfle(const FLEObject& obj);
