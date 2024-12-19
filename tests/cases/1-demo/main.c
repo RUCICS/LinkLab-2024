@@ -1,22 +1,21 @@
-// As if this is the C standard library headers.
-
-#include <stddef.h>
-#include <sys/syscall.h>
-
-long syscall(int num, ...);
-size_t strlen(const char* s);
-char* strcpy(char* d, const char* s);
-char* strchr(const char* s, int c);
-void print(const char* s, ...);
+#include "minilibc.h"
 
 // Global data
 int n = 10;
 
+// External data
+extern char msg[];
+
+// External function
+int foo();
+
 int main()
 {
+    // Pointers
+    const char* p = msg;
+
     // Function calls
-    char* p = "Hello, World!";
-    for (int i = 0; i < strlen(p); i++) {
+    for (int i = 0; i < foo(); i++) {
         print("Message: ", p, NULL);
     }
 
