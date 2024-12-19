@@ -6,7 +6,14 @@ score = 10
 [[run]]
 name = "Compile foo.c"
 command = "${root_dir}/cc"
-args = ["${test_dir}/foo.c", "-o", "${build_dir}/foo.o", "-I${common_dir}"]
+args = [
+    "${test_dir}/foo.c",
+    "-o",
+    "${build_dir}/foo.o",
+    "-I${common_dir}",
+    "-g",
+    "-Os",
+]
 
 [run.check]
 files = ["${build_dir}/foo.fle"]
@@ -14,7 +21,14 @@ files = ["${build_dir}/foo.fle"]
 [[run]]
 name = "Compile main.c"
 command = "${root_dir}/cc"
-args = ["${test_dir}/main.c", "-o", "${build_dir}/main.o", "-I${common_dir}"]
+args = [
+    "${test_dir}/main.c",
+    "-o",
+    "${build_dir}/main.o",
+    "-I${common_dir}",
+    "-g",
+    "-Os",
+]
 
 [run.check]
 files = ["${build_dir}/main.fle"]
