@@ -59,7 +59,6 @@ json elf_to_fle(const std::string& binary, const std::string& section)
             char symb_type = match[2].str()[0];
             std::string section = match[4].str();
             std::string name = match[6].str();
-            std::replace(name.begin(), name.end(), '.', '_'); // 替换点为下划线
 
             symbols.push_back(Symbol(symb_type, section, offset, name));
         }
@@ -82,7 +81,6 @@ json elf_to_fle(const std::string& binary, const std::string& section)
                 if (at_pos != std::string::npos) {
                     symbol = symbol.substr(0, at_pos);
                 }
-                std::replace(symbol.begin(), symbol.end(), '.', '_');
 
                 // 确定重定位类型和格式
                 std::string reloc_type = match[3];
