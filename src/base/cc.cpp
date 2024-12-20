@@ -51,10 +51,13 @@ json elf_to_fle(const std::string& binary, const std::string& section)
     };
 
     std::vector<Symbol> symbols;
-    std::regex pattern(
+    // e.g.
+    // Addr            Flag Bind Sect      Size        Name
+    // 0000000000000000 g     F .text  000000000000001d foo
+    std::regex symbol_pattern(
         R"(^([0-9a-fA-F]+)\s+(l|g)\s+(\w+)?\s+([.a-zA-Z0-9_]+)\s+([0-9a-fA-F]+)\s+(.*)$)");
     for (auto& line : splitlines(names)) {
-        if (std::smatch match; std::regex_match(line, match, pattern)) {
+        if (std::smatch match; std::regex_match(line, match, symbol_pattern)) {
             unsigned int offset = std::stoul(match[1].str(), nullptr, 16);
             char symb_type = match[2].str()[0];
             std::string section = match[4].str();
@@ -66,13 +69,16 @@ json elf_to_fle(const std::string& binary, const std::string& section)
 
     std::map<int, std::pair<int, std::string>> relocations;
     bool enabled = true;
-    pattern = std::regex(
+    // e.g.
+    //   Offset          Info           Type           Sym. Value    Sym. Name + Addend
+    // 000000000059  001100000001 R_X86_64_64       0000000000000000 n + 0
+    std::regex reloc_pattern(
         R"(^\s*([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+(\S+)\s+([0-9a-fA-F]+)\s+(.*)$)");
     for (auto& line : splitlines(relocs)) {
         if (line.find("Relocation section") != std::string::npos) {
             enabled = line.find(".rela" + section) != std::string::npos;
         } else if (enabled) {
-            if (std::smatch match; std::regex_match(line, match, pattern)) {
+            if (std::smatch match; std::regex_match(line, match, reloc_pattern)) {
                 int offset = std::stoi(match[1], nullptr, 16);
                 std::string symbol = match[5];
 
@@ -186,10 +192,14 @@ void FLE_cc(const std::vector<std::string>& options)
     json res;
     res["type"] = ".obj";
 
+    // e.g.
+    // Idx Name          Size      VMA               LMA               File off  Algn
+    // 0 .text         0000001d  0000000000000000  0000000000000000  00000040  2**0
+    //                  CONTENTS, ALLOC, LOAD, RELOC, READONLY, CODE
+    std::regex section_pattern(R"(^\s*([0-9]+)\s+(\.(\w|\.)+)\s+([0-9a-fA-F]+)\s+.*$)");
     for (size_t i = 0; i < lines.size(); ++i) {
-        std::regex pattern(R"(^\s*([0-9]+)\s+(\.(\w|\.)+)\s+([0-9a-fA-F]+)\s+.*$)");
         std::smatch match;
-        if (std::regex_match(lines[i], match, pattern)) {
+        if (std::regex_match(lines[i], match, section_pattern)) {
             std::string section = match[2];
             std::string flags_line = lines[i + 1];
             std::vector<std::string> flags;

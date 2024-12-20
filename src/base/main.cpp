@@ -84,7 +84,7 @@ FLEObject load_fle(const std::string& file)
             } else if (prefix == "❓") {
                 // 处理重定位
                 std::string reloc_str = trim(content);
-                // eg: rel(n - 4)
+                // e.g. rel(n - 4)
                 std::regex reloc_pattern(R"(\.(rel|abs)\(([\w.]+)\s*[-+]\s*(\d+)\))");
                 std::smatch match;
 
