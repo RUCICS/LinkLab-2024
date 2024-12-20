@@ -23,6 +23,9 @@ BASE_EXEC = fle_base
 # 工具名称
 TOOLS = cc ld nm objdump readfle exec
 
+# 默认目标
+all: check_compiler $(TOOLS)
+
 # 检查编译器版本和标准支持
 check_compiler:
 	@echo "Checking compiler configuration..."
@@ -34,9 +37,6 @@ check_compiler:
 	@echo "Compiler supports C++$(REQUIRED_CXX_STANDARD) ✓"
 	@echo "Compiler check completed"
 	@echo "------------------------"
-
-# 默认目标
-all: check_compiler $(TOOLS)
 
 # 编译源文件
 %.o: %.cpp
