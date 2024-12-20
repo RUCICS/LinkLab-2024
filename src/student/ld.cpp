@@ -70,6 +70,10 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
     std::map<std::string, Symbol> global_symbols; // 全局符号表
     std::map<std::string, size_t> local_symbols; // 局部符号表
 
+    auto local_name_prefix = [](std::string_view obj_name, std::string_view sym_name) {
+        return std::string(obj_name) + "." + std::string(sym_name);
+    };
+
     for (const auto& obj : objects) {
         for (const auto& sym : obj.symbols) {
             // First, find the section
@@ -90,7 +94,7 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
             std::cout << "Symbol " << sym.name << " in " << obj.name << " at offset " << abs_offset << std::endl;
 
             if (sym.type == SymbolType::LOCAL) {
-                local_symbols[sym.name] = abs_offset;
+                local_symbols[local_name_prefix(obj.name, sym.name)] = abs_offset;
             } else {
                 auto it = global_symbols.find(sym.name);
                 if (it == global_symbols.end()) {
@@ -120,15 +124,18 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
 
                 // 查找符号值
                 int64_t symbol_value;
-                auto global_it = global_symbols.find(reloc.symbol);
-                if (global_it != global_symbols.end()) {
-                    symbol_value = global_it->second.offset;
+                // First, check if it's a local symbol
+                auto local_it = local_symbols.find(local_name_prefix(raw_section.file_name, reloc.symbol));
+                if (local_it != local_symbols.end()) {
+                    symbol_value = local_it->second;
                 } else {
-                    auto local_it = local_symbols.find(reloc.symbol);
-                    if (local_it == local_symbols.end()) {
+                    // Then, check if it's a global symbol
+                    auto global_it = global_symbols.find(reloc.symbol);
+                    if (global_it != global_symbols.end()) {
+                        symbol_value = global_it->second.offset;
+                    } else {
                         throw std::runtime_error("Undefined symbol: " + reloc.symbol);
                     }
-                    symbol_value = local_it->second;
                 }
 
                 // 计算重定位值
