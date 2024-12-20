@@ -147,13 +147,16 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
                 case RelocationType::R_X86_64_PC32:
                     value = symbol_value + reloc.addend - new_reloc.offset - 8;
                     break;
+                case RelocationType::R_X86_64_64:
+                    value = symbol_value + reloc.addend;
+                    break;
                 default:
                     throw std::runtime_error("Unsupported relocation type");
                 }
 
                 // 写入重定位值
-                for (int i = 0; i < 4; ++i) {
-                    // Assume little-endian
+                size_t size = (reloc.type == RelocationType::R_X86_64_64) ? 8 : 4;
+                for (size_t i = 0; i != size; ++i) {
                     load_section.data[new_reloc.offset + i] = (value >> (i * 8)) & 0xFF;
                 }
             }

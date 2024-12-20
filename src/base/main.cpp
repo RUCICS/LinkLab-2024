@@ -85,15 +85,24 @@ FLEObject load_fle(const std::string& file)
                 // 处理重定位
                 std::string reloc_str = trim(content);
                 // e.g. rel(n - 4)
-                std::regex reloc_pattern(R"(\.(rel|abs)\(([\w.]+)\s*[-+]\s*(\d+)\))");
+                std::regex reloc_pattern(R"(\.(rel|abs64|abs)\(([\w.]+)\s*[-+]\s*(\d+)\))");
                 std::smatch match;
 
                 if (!std::regex_match(reloc_str, match, reloc_pattern)) {
                     throw std::runtime_error("Invalid relocation: " + reloc_str);
                 }
 
+                RelocationType type;
+                if (match[1].str() == "rel") {
+                    type = RelocationType::R_X86_64_PC32;
+                } else if (match[1].str() == "abs64") {
+                    type = RelocationType::R_X86_64_64;
+                } else {
+                    type = RelocationType::R_X86_64_32;
+                }
+
                 Relocation reloc {
-                    (match[1].str() == "rel") ? RelocationType::R_X86_64_PC32 : RelocationType::R_X86_64_32,
+                    type,
                     section.data.size(),
                     match[2].str(),
                     std::stoi(match[3].str())
@@ -101,8 +110,9 @@ FLEObject load_fle(const std::string& file)
 
                 section.relocs.push_back(reloc);
 
-                // Assume 4 bytes per instruction
-                for (size_t i = 0; i < 4; ++i) {
+                // 根据重定位类型预留空间
+                size_t size = (type == RelocationType::R_X86_64_64) ? 8 : 4;
+                for (size_t i = 0; i < size; ++i) {
                     section.data.push_back(0);
                 }
             }

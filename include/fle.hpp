@@ -12,6 +12,7 @@ using json = nlohmann::ordered_json;
 enum class RelocationType {
     R_X86_64_32, // 32位绝对寻址
     R_X86_64_PC32, // 32位相对寻址
+    R_X86_64_64, // 64位绝对寻址
 };
 
 // 重定位项
