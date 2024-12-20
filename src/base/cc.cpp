@@ -55,7 +55,7 @@ json elf_to_fle(const std::string& binary, const std::string& section)
     // Addr            Flag Bind Sect      Size        Name
     // 0000000000000000 g     F .text  000000000000001d foo
     std::regex symbol_pattern(
-        R"(^([0-9a-fA-F]+)\s+(l|g)\s+(\w+)?\s+([.a-zA-Z0-9_]+)\s+([0-9a-fA-F]+)\s+(.*)$)");
+        R"(^([0-9a-fA-F]+)\s+(l|g|w)\s+(\w+)?\s+([.a-zA-Z0-9_]+)\s+([0-9a-fA-F]+)\s+(.*)$)");
     for (auto& line : splitlines(names)) {
         if (std::smatch match; std::regex_match(line, match, symbol_pattern)) {
             unsigned int offset = std::stoul(match[1].str(), nullptr, 16);
@@ -129,8 +129,12 @@ json elf_to_fle(const std::string& binary, const std::string& section)
                 do_dump(holding);
                 if (sym.symb_type == 'l') {
                     res.push_back("🏷️: " + sym.name);
-                } else {
+                } else if (sym.symb_type == 'g') {
                     res.push_back("📤: " + sym.name);
+                } else if (sym.symb_type == 'w') {
+                    res.push_back("📎: " + sym.name);
+                } else {
+                    throw std::runtime_error("Unsupported symbol type: " + std::string(1, sym.symb_type));
                 }
             }
         }
