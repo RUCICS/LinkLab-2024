@@ -61,9 +61,28 @@ void print(const char* s, ...)
 
 int sprintf(char* buf, const char* fmt, ...)
 {
-    char* p = buf;
     va_list ap;
     va_start(ap, fmt);
+    int len = vsprintf(buf, fmt, ap);
+    va_end(ap);
+    return len;
+}
+
+int printf(const char* fmt, ...)
+{
+    char buf[1024]; // 简单起见，使用固定大小缓冲区
+    va_list ap;
+    va_start(ap, fmt);
+    int len = vsprintf(buf, fmt, ap);
+    va_end(ap);
+
+    syscall(SYS_write, 1, buf, len);
+    return len;
+}
+
+int vsprintf(char* buf, const char* fmt, va_list ap)
+{
+    char* p = buf;
 
     while (*fmt) {
         if (*fmt == '%') {
@@ -101,7 +120,6 @@ int sprintf(char* buf, const char* fmt, ...)
     }
 
     *p = '\0';
-    va_end(ap);
     return p - buf;
 }
 
