@@ -1,6 +1,5 @@
 #include "fle.hpp"
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
@@ -14,28 +13,35 @@ void FLE_exec(const FLEObject& obj)
         throw std::runtime_error("File is not an executable FLE.");
     }
 
-    // 根据程序头映射内存
+    // Map each section
     for (const auto& phdr : obj.phdrs) {
         void* addr = mmap((void*)phdr.vaddr, phdr.size,
-            (phdr.flags & static_cast<uint32_t>(PHF::R) ? PROT_READ : 0)
-                | (phdr.flags & static_cast<uint32_t>(PHF::W) ? PROT_WRITE : 0)
-                | (phdr.flags & static_cast<uint32_t>(PHF::X) ? PROT_EXEC : 0),
+            PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1, 0);
+        // ! We need to set the permissions after copying the data
 
         if (addr == MAP_FAILED) {
             throw std::runtime_error(std::string("mmap failed: ") + strerror(errno));
         }
 
-        // 复制段数据
+        // First, copy the section data
         auto it = obj.sections.find(phdr.name);
         if (it == obj.sections.end()) {
             throw std::runtime_error("Section not found: " + phdr.name);
         }
         memcpy(addr, it->second.data.data(), phdr.size);
+
+        // Then, set the final permissions
+        mprotect(addr, phdr.size,
+            (phdr.flags & static_cast<uint32_t>(PHF::R) ? PROT_READ : 0)
+                | (phdr.flags & static_cast<uint32_t>(PHF::W) ? PROT_WRITE : 0)
+                | (phdr.flags & static_cast<uint32_t>(PHF::X) ? PROT_EXEC : 0));
     }
 
-    // 跳转到入口点
     using FuncType = int (*)();
     FuncType func = reinterpret_cast<FuncType>(obj.entry);
     func();
+
+    // Should not reach here, since `func` is NoReturn.
+    assert(false);
 }
