@@ -3,7 +3,7 @@
 
 
 CXX = g++
-CXXFLAGS = -std=c++20 -Wall -Wextra -I./include -Os -g
+CXXFLAGS = -std=c++20 -Wall -Wextra -I./include -Os -g -fPIE
 REQUIRED_CXX_STANDARD = 20
 
 # 源文件
@@ -44,7 +44,7 @@ check_compiler:
 
 # 先编译基础可执行文件
 $(BASE_EXEC): $(OBJS) $(HEADERS)
-	$(CXX) $(CXXFLAGS) -o $@ $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) -pie
 
 # 为每个工具创建符号链接
 $(TOOLS): $(BASE_EXEC)
