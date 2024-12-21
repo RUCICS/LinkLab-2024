@@ -7,7 +7,13 @@ void FLE_objdump(const FLEObject& obj, FLEWriter& writer)
 {
     writer.set_type(obj.type);
 
-    // 处理每个段
+    // 如果是可执行文件，写入程序头和入口点
+    if (obj.type == ".exe") {
+        writer.write_program_headers(obj.phdrs);
+        writer.write_entry(obj.entry);
+    }
+
+    // 写入所有段的内容
     for (const auto& [name, section] : obj.sections) {
         writer.begin_section(name);
 

@@ -23,14 +23,26 @@ FLEObject load_fle(const std::string& file)
     obj.name = get_basename(file);
     obj.type = j["type"].get<std::string>();
 
-    // 如果是可执行文件，读取入口点
-    if (obj.type == ".exe" && j.contains("entry")) {
-        obj.entry = j["entry"].get<size_t>();
+    // 如果是可执行文件，读取入口点和程序头
+    if (obj.type == ".exe") {
+        if (j.contains("entry")) {
+            obj.entry = j["entry"].get<size_t>();
+        }
+        if (j.contains("phdrs")) {
+            for (const auto& phdr_json : j["phdrs"]) {
+                ProgramHeader phdr;
+                phdr.name = phdr_json["name"].get<std::string>();
+                phdr.vaddr = phdr_json["vaddr"].get<uint64_t>();
+                phdr.size = phdr_json["size"].get<uint32_t>();
+                phdr.flags = phdr_json["flags"].get<uint32_t>();
+                obj.phdrs.push_back(phdr);
+            }
+        }
     }
 
     // 处理每个段
     for (auto& [key, value] : j.items()) {
-        if (key == "type" || key == "entry")
+        if (key == "type" || key == "entry" || key == "phdrs")
             continue;
 
         FLESection section;
@@ -85,15 +97,24 @@ FLEObject load_fle(const std::string& file)
                 // 处理重定位
                 std::string reloc_str = trim(content);
                 // e.g. rel(n - 4)
-                std::regex reloc_pattern(R"(\.(rel|abs)\(([\w.]+)\s*[-+]\s*(\d+)\))");
+                std::regex reloc_pattern(R"(\.(rel|abs64|abs)\(([\w.]+)\s*[-+]\s*(\d+)\))");
                 std::smatch match;
 
                 if (!std::regex_match(reloc_str, match, reloc_pattern)) {
                     throw std::runtime_error("Invalid relocation: " + reloc_str);
                 }
 
+                RelocationType type;
+                if (match[1].str() == "rel") {
+                    type = RelocationType::R_X86_64_PC32;
+                } else if (match[1].str() == "abs64") {
+                    type = RelocationType::R_X86_64_64;
+                } else {
+                    type = RelocationType::R_X86_64_32;
+                }
+
                 Relocation reloc {
-                    (match[1].str() == "rel") ? RelocationType::R_X86_64_PC32 : RelocationType::R_X86_64_32,
+                    type,
                     section.data.size(),
                     match[2].str(),
                     std::stoi(match[3].str())
@@ -101,8 +122,9 @@ FLEObject load_fle(const std::string& file)
 
                 section.relocs.push_back(reloc);
 
-                // Assume 4 bytes per instruction
-                for (size_t i = 0; i < 4; ++i) {
+                // 根据重定位类型预留空间
+                size_t size = (type == RelocationType::R_X86_64_64) ? 8 : 4;
+                for (size_t i = 0; i < size; ++i) {
                     section.data.push_back(0);
                 }
             }
@@ -155,9 +177,6 @@ int main(int argc, char* argv[])
             for (size_t i = 0; i < args.size(); ++i) {
                 if (args[i] == "-o" && i + 1 < args.size()) {
                     outfile = args[++i];
-                    // if (!outfile.ends_with(".fle")) {
-                    //     outfile += ".fle";
-                    // }
                 } else {
                     input_files.push_back(args[i]);
                 }
@@ -180,32 +199,13 @@ int main(int argc, char* argv[])
                 }
             }
 
-            FLEObject result = FLE_ld(objects);
+            // 链接
+            FLEObject linked_obj = FLE_ld(objects);
 
-            json j;
-            j["type"] = result.type;
-
-            // 只写入 .load 段的数据
-            std::vector<std::string> lines;
-            const auto& load_section = result.sections[".load"];
-
-            // 写入数据
-            for (size_t i = 0; i < load_section.data.size(); i += 16) {
-                std::stringstream ss;
-                ss << "🔢: ";
-                for (size_t j = 0; j < 16 && i + j < load_section.data.size(); ++j) {
-                    ss << std::hex << std::setw(2) << std::setfill('0')
-                       << static_cast<int>(load_section.data[i + j]) << " ";
-                }
-                lines.push_back(ss.str());
-            }
-            j[".load"] = lines;
-
-            // 写入入口点
-            j["entry"] = result.entry;
-
-            std::ofstream out(outfile);
-            out << j.dump(4) << std::endl;
+            // 写入文件
+            FLEWriter writer;
+            FLE_objdump(linked_obj, writer);
+            writer.write_to_file(outfile);
         } else if (tool == "FLE_cc") {
             FLE_cc(args);
         } else if (tool == "FLE_readfle") {

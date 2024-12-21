@@ -93,8 +93,10 @@ json elf_to_fle(const std::string& binary, const std::string& section)
                 std::string reloc_format;
                 if (reloc_type == "R_X86_64_PC32" || reloc_type == "R_X86_64_PLT32") {
                     reloc_format = ".rel"; // 相对重定位
+                } else if (reloc_type == "R_X86_64_64") {
+                    reloc_format = ".abs64"; // 64位绝对重定位
                 } else if (reloc_type == "R_X86_64_32") {
-                    reloc_format = ".abs"; // 绝对重定位
+                    reloc_format = ".abs"; // 32位绝对重定位
                 } else {
                     throw std::runtime_error("Unsupported relocation type: " + reloc_type);
                 }
@@ -102,7 +104,8 @@ json elf_to_fle(const std::string& binary, const std::string& section)
                 // 生成重定位表达式
                 std::stringstream ss;
                 ss << reloc_format << "(" << symbol << ")";
-                relocations[offset] = { 4, ss.str() };
+                size_t size = (reloc_type == "R_X86_64_64") ? 8 : 4;
+                relocations[offset] = { size, ss.str() };
             }
         }
     }

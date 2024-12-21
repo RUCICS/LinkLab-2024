@@ -12,6 +12,7 @@ using json = nlohmann::ordered_json;
 enum class RelocationType {
     R_X86_64_32, // 32位绝对寻址
     R_X86_64_PC32, // 32位相对寻址
+    R_X86_64_64, // 64位绝对寻址
 };
 
 // 重定位项
@@ -43,12 +44,26 @@ struct FLESection {
     std::vector<Relocation> relocs; // Relocations for this section
 };
 
+enum class PHF { // Program Header Flags
+    X = 1, // 可执行
+    W = 2, // 可写
+    R = 4 // 可读
+};
+
+struct ProgramHeader {
+    std::string name; // 段名
+    uint64_t vaddr; // 虚拟地址（改用64位）
+    uint32_t size; // 段大小
+    uint32_t flags; // 权限
+};
+
 struct FLEObject {
     std::string name; // object name
     std::string type; // ".obj" or ".exe"
     std::map<std::string, FLESection> sections; // Section name -> section data
     std::vector<Symbol> symbols; // Global symbol table
-    size_t entry = 0; // Entry point (valid only for .exe)
+    std::vector<ProgramHeader> phdrs; // Program headers (for .exe)
+    size_t entry = 0; // Entry point (for .exe)
 };
 
 class FLEWriter {
@@ -82,6 +97,25 @@ public:
     {
         std::ofstream out(filename);
         out << result.dump(4) << std::endl;
+    }
+
+    void write_program_headers(const std::vector<ProgramHeader>& phdrs)
+    {
+        json phdrs_json = json::array();
+        for (const auto& phdr : phdrs) {
+            json phdr_json;
+            phdr_json["name"] = phdr.name;
+            phdr_json["vaddr"] = phdr.vaddr;
+            phdr_json["size"] = phdr.size;
+            phdr_json["flags"] = phdr.flags;
+            phdrs_json.push_back(phdr_json);
+        }
+        result["phdrs"] = phdrs_json;
+    }
+
+    void write_entry(size_t entry)
+    {
+        result["entry"] = entry;
     }
 
 private:
