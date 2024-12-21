@@ -1,6 +1,5 @@
 #include "fle.hpp"
 #include <cassert>
-#include <iomanip>
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -25,7 +24,6 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
 
     // 1. Collect all sections
     std::map<SectionName, std::vector<RawSection>> section_groups;
-    std::vector<SectionName> ordered_section_names;
 
     for (const auto& obj : objects) {
         for (const auto& [section_name, raw_section] : obj.sections) {
@@ -38,21 +36,15 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
                 .offset = 0, // To be calculated later
                 .global_offset = 0, // To be calculated later
             });
-            if (std::find(ordered_section_names.begin(), ordered_section_names.end(), section_name) == ordered_section_names.end()) {
-                ordered_section_names.push_back(section_name);
-            }
         }
     }
-
-    // 2. Merge sections and generate program headers
 
     uint64_t section_vaddr = 0;
     constexpr uint64_t BASE_VADDR = 0x400000;
     constexpr uint64_t PAGE_SIZE = 0x1000;
 
-    for (auto name : ordered_section_names) {
+    for (auto& [name, sections] : section_groups) {
         std::cout << "\nMerging section: " << name << std::endl;
-        auto& sections = section_groups[name];
 
         FLESection merged_section;
         for (auto& raw_section : sections) {
@@ -83,7 +75,6 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
         section_vaddr = (section_vaddr + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     }
 
-    // 3. Collect all symbols
     std::map<std::string, Symbol> global_symbols;
     std::map<std::string, size_t> local_symbols;
 
@@ -136,7 +127,6 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
         }
     }
 
-    // 第三遍：处理重定位
     std::cout << "\n=== Phase 3: Processing Relocations ===\n";
     for (const auto& [name, sections] : section_groups) {
         for (const auto& raw_section : sections) {
@@ -169,7 +159,7 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
 
                 std::cout << "  Symbol value: 0x" << std::hex << symbol_value << std::dec << std::endl;
 
-                // 计算重定位值
+                // Calculate the relocation value
                 int64_t value;
                 switch (reloc.type) {
                 case RelocationType::R_X86_64_32:
@@ -187,7 +177,7 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
 
                 std::cout << "  Final value: 0x" << std::hex << value << std::dec << std::endl;
 
-                // 写入重定位值
+                // Write the relocation value
                 size_t size = (reloc.type == RelocationType::R_X86_64_64) ? 8 : 4;
                 size_t reloc_offset = raw_section.offset + reloc.offset;
                 for (size_t i = 0; i != size; ++i) {
@@ -197,7 +187,6 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
         }
     }
 
-    // 设置入口点（_start 符号的位置）
     auto start_it = global_symbols.find("_start");
     if (start_it == global_symbols.end()) {
         throw std::runtime_error("No _start symbol found");
