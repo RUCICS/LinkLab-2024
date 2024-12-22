@@ -221,39 +221,39 @@ class SpecialJudgeChecker:
         if "special_judge" not in check:
             return True, "No special judge specified", None
 
-            judge_script = test_dir / check["special_judge"]
-            if not judge_script.exists():
-                return (
-                    False,
-                    f"Special judge script {check['special_judge']} not found",
-                    None,
-                )
+        judge_script = test_dir / check["special_judge"]
+        if not judge_script.exists():
+            return (
+                False,
+                f"Special judge script {check['special_judge']} not found",
+                None,
+            )
 
-            input_data = {
-                "stdout": output,
-                "stderr": error,
-                "return_code": return_code,
-                "test_dir": str(test_dir),
-                "max_score": step.get("score", 0),
-            }
+        input_data = {
+            "stdout": output,
+            "stderr": error,
+            "return_code": return_code,
+            "test_dir": str(test_dir),
+            "max_score": step.get("score", 0),
+        }
 
-            try:
-                process = subprocess.run(
-                    [sys.executable, str(judge_script)],
-                    input=json.dumps(input_data).encode(),
-                    capture_output=True,
-                    text=True,
-                )
-                result = json.loads(process.stdout)
-                if "score" in result:
-                    result["score"] = min(result["score"], step.get("score", 0))
-                return (
-                    result["success"],
-                    result.get("message", "No message provided"),
-                    result.get("score", None),
-                )
-            except Exception as e:
-                return False, f"Special judge failed: {str(e)}", None
+        try:
+            process = subprocess.run(
+                [sys.executable, str(judge_script)],
+                input=json.dumps(input_data),
+                capture_output=True,
+                text=True,
+            )
+            result = json.loads(process.stdout)
+            if "score" in result:
+                result["score"] = min(result["score"], step.get("score", 0))
+            return (
+                result["success"],
+                result.get("message", "No message provided"),
+                result.get("score", None),
+            )
+        except Exception as e:
+            return False, f"Special judge failed: {str(e)}", None
 
 
 class PatternChecker:
@@ -328,6 +328,7 @@ class TestRunner:
                         file.unlink()
             build_dir.mkdir(exist_ok=True)
 
+            result = None
             if self.console and not isinstance(self.console, type):
                 # 在 rich 环境下显示进度条
                 status_icons = {
@@ -348,8 +349,60 @@ class TestRunner:
                     result = self._execute_test_steps(test, progress, task)
                     # 根据状态设置图标
                     progress.columns[0].finished_text = status_icons[result.status]
-                    progress.update(task, completed=total_steps)
-                    return result
+                    # 更新最终状态，移除Running字样，加上结果提示
+                    final_status = {
+                        "PASS": "[green]Passed[/green]",
+                        "PARTIAL": "[yellow]Partial[/yellow]",
+                        "FAIL": "[red]Failed[/red]",
+                    }[result.status]
+                    progress.update(
+                        task,
+                        completed=total_steps,
+                        description=f"{test.meta['name']} [{total_steps}/{total_steps}]: {final_status}",
+                    )
+
+                # 如果测试失败，在进度显示完成后输出失败信息
+                if not result.success:
+                    # 获取失败的步骤信息
+                    step_index = result.error_details["step"]
+                    step = test.run_steps[step_index - 1]
+                    cmd = [self._resolve_path(step["command"], test.path)]
+                    if "args" in step:
+                        cmd.extend(
+                            [
+                                self._resolve_path(str(arg), test.path)
+                                for arg in step.get("args", [])
+                            ]
+                        )
+
+                    self.console.print(
+                        f"\n[red]Test '{test.meta['name']}' failed at step {step_index}:[/red]"
+                    )
+                    self.console.print(f"Command: {' '.join(cmd)}")
+
+                    if "stdout" in result.error_details:
+                        self.console.print("\nActual output:")
+                        self.console.print(result.error_details["stdout"])
+
+                    if "stderr" in result.error_details:
+                        self.console.print("\nError output:")
+                        self.console.print(result.error_details["stderr"])
+
+                    if "expected_output" in result.error_details:
+                        self.console.print("\nExpected output:")
+                        self.console.print(result.error_details["expected_output"])
+
+                    if "error_message" in result.error_details:
+                        self.console.print("\nError details:")
+                        self.console.print(f"  {result.error_details['error_message']}")
+
+                    if "return_code" in result.error_details:
+                        self.console.print(
+                            f"\nReturn code: {result.error_details['return_code']}"
+                        )
+
+                    self.console.print()  # 添加一个空行作为分隔
+                return result
             else:
                 # 在非 rich 环境下直接执行
                 return self._execute_test_steps(test)
@@ -406,7 +459,11 @@ class TestRunner:
                 step_scores.extend(result.step_scores)
 
                 if progress is not None and task is not None:
-                    progress.update(task, completed=i)
+                    progress.update(
+                        task,
+                        description=f"Running {test.meta['name']} [{i}/{len(test.run_steps)}]: {step_name}",
+                        completed=i,
+                    )
 
         if not has_step_scores:
             total_score = test.meta["score"]
@@ -455,7 +512,17 @@ class TestRunner:
 
             if not success:
                 return self._create_failure_result(
-                    test, step, step_index, message, start_time
+                    test,
+                    step,
+                    step_index,
+                    message,
+                    start_time,
+                    process.stdout,
+                    process.stderr,
+                    process.returncode,
+                    process.stdout
+                    if "expected_output" in step.get("check", {})
+                    else "",
                 )
 
         return self._create_success_result(test, step, score, start_time)
@@ -510,18 +577,32 @@ class TestRunner:
         step_index: int,
         message: str,
         start_time: float,
+        stdout: str = "",
+        stderr: str = "",
+        return_code: Optional[int] = None,
+        expected_output: str = "",
     ) -> TestResult:
+        error_details = {
+            "step": step_index,
+            "step_name": step.get("name", step["command"]),
+            "error_message": message,
+        }
+        if stdout:
+            error_details["stdout"] = stdout
+        if stderr:
+            error_details["stderr"] = stderr
+        if return_code is not None:
+            error_details["return_code"] = return_code
+        if expected_output:
+            error_details["expected_output"] = expected_output
+
         return TestResult(
             success=False,
             message=f"Step {step_index} '{step.get('name', step['command'])}' failed: {message}",
             time=time.perf_counter() - start_time,
             score=0,
             max_score=step.get("score", test.meta["score"]),
-            error_details={
-                "step": step_index,
-                "step_name": step.get("name", step["command"]),
-                "error_message": message,
-            },
+            error_details=error_details,
         )
 
     def _create_success_result(

@@ -1,6 +1,6 @@
 [meta]
-name = "Hello World Test"
-description = "Test program output and return value"
+name = "Absolute + Relative Addressing Test"
+description = "Test absolute addressing (global variables) and relative addressing (function calls) in non-PIE mode"
 score = 10
 
 [[run]]
@@ -13,9 +13,12 @@ args = [
     "-I${common_dir}",
     "-g",
     "-Os",
+    "-fno-PIE",           # Disable PIE
+    "-fno-PIC",           # Disable PIC
 ]
 
 [run.check]
+return_code = 0
 files = ["${build_dir}/foo.fle"]
 
 [[run]]
@@ -28,6 +31,8 @@ args = [
     "-I${common_dir}",
     "-g",
     "-Os",
+    "-fno-PIE",            # Disable PIE
+    "-fno-PIC",            # Disable PIC
 ]
 
 [run.check]
@@ -54,4 +59,4 @@ args = ["${build_dir}/program"]
 
 [run.check]
 stdout = "ans.out"
-return_code = 42
+return_code = 100  # Return value should be 100

@@ -164,7 +164,7 @@ json elf_to_fle(const std::string& binary, const std::string& section)
 
 constexpr std::array CFLAGS = {
     "-static"sv,
-    "-fPIE"sv,
+    // "-fPIE"sv,
     "-nostdlib"sv,
     "-ffreestanding"sv,
     "-fno-asynchronous-unwind-tables"sv,
