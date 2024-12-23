@@ -38,14 +38,28 @@ FLEObject load_fle(const std::string& file)
                 obj.phdrs.push_back(phdr);
             }
         }
+        if (j.contains("shdrs")) {
+            for (const auto& shdr_json : j["shdrs"]) {
+                SectionHeader shdr;
+                shdr.name = shdr_json["name"].get<std::string>();
+                shdr.type = shdr_json["type"].get<uint32_t>();
+                shdr.flags = shdr_json["flags"].get<uint32_t>();
+                shdr.addr = shdr_json["addr"].get<uint64_t>();
+                shdr.offset = shdr_json["offset"].get<uint64_t>();
+                shdr.size = shdr_json["size"].get<uint64_t>();
+                shdr.addralign = shdr_json["addralign"].get<uint32_t>();
+                obj.shdrs.push_back(shdr);
+            }
+        }
     }
 
     // 处理每个段
     for (auto& [key, value] : j.items()) {
-        if (key == "type" || key == "entry" || key == "phdrs")
+        if (key == "type" || key == "entry" || key == "phdrs" || key == "shdrs")
             continue;
 
         FLESection section;
+        size_t bss_size = 0;
 
         // 处理段的内容
         for (const auto& line : value) {
@@ -64,40 +78,55 @@ FLEObject load_fle(const std::string& file)
                 }
             } else if (prefix == "🏷️") {
                 // 处理局部符号
-                std::string name = content;
+                std::string name;
+                size_t size;
+                std::istringstream ss(content);
+                ss >> name >> size;
                 Symbol sym {
                     SymbolType::LOCAL,
                     std::string(key),
                     section.data.size(),
+                    size,
                     trim(name)
                 };
                 std::cerr << "Loading symbol: " << sym.name << " in section " << sym.section << " at offset " << sym.offset << std::endl;
                 obj.symbols.push_back(sym);
+                bss_size += size;
             } else if (prefix == "📎") {
                 // 处理弱全局符号
-                std::string name = content;
+                std::string name;
+                size_t size;
+                std::istringstream ss(content);
+                ss >> name >> size;
                 Symbol sym {
                     SymbolType::WEAK,
                     std::string(key),
                     section.data.size(),
+                    size,
                     trim(name)
                 };
                 obj.symbols.push_back(sym);
+                bss_size += size;
             } else if (prefix == "📤") {
                 // 处理强全局符号
-                std::string name = content;
+                std::string name;
+                size_t size;
+                std::istringstream ss(content);
+                ss >> name >> size;
                 Symbol sym {
                     SymbolType::GLOBAL,
                     std::string(key),
                     section.data.size(),
+                    size,
                     trim(name)
                 };
                 obj.symbols.push_back(sym);
+                bss_size += size;
             } else if (prefix == "❓") {
                 // 处理重定位
                 std::string reloc_str = trim(content);
                 // e.g. rel(n - 4)
-                std::regex reloc_pattern(R"(\.(rel|abs64|abs)\(([\w.]+)\s*[-+]\s*(\d+)\))");
+                std::regex reloc_pattern(R"(\.(rel|abs64|abs|abs32s)\(([\w.]+)\s*[-+]\s*(\d+)\))");
                 std::smatch match;
 
                 if (!std::regex_match(reloc_str, match, reloc_pattern)) {
@@ -109,8 +138,12 @@ FLEObject load_fle(const std::string& file)
                     type = RelocationType::R_X86_64_PC32;
                 } else if (match[1].str() == "abs64") {
                     type = RelocationType::R_X86_64_64;
-                } else {
+                } else if (match[1].str() == "abs") {
                     type = RelocationType::R_X86_64_32;
+                } else if (match[1].str() == "abs32s") {
+                    type = RelocationType::R_X86_64_32S;
+                } else {
+                    throw std::runtime_error("Invalid relocation type: " + match[1].str());
                 }
 
                 Relocation reloc {
@@ -128,6 +161,12 @@ FLEObject load_fle(const std::string& file)
                     section.data.push_back(0);
                 }
             }
+        }
+
+        if (key == ".bss") {
+            section.bss_size = bss_size;
+        } else {
+            section.bss_size = 0;
         }
 
         obj.sections[key] = section;

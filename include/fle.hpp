@@ -13,6 +13,7 @@ enum class RelocationType {
     R_X86_64_32, // 32位绝对寻址
     R_X86_64_PC32, // 32位相对寻址
     R_X86_64_64, // 64位绝对寻址
+    R_X86_64_32S, // 32位有符号绝对寻址
 };
 
 // 重定位项
@@ -35,6 +36,7 @@ struct Symbol {
     SymbolType type;
     std::string section; // 符号所在的节名
     size_t offset; // 在节内的偏移
+    size_t size; // 符号大小
     std::string name; // 符号名称
 };
 
@@ -42,12 +44,30 @@ struct Symbol {
 struct FLESection {
     std::vector<uint8_t> data; // Raw data
     std::vector<Relocation> relocs; // Relocations for this section
+    size_t bss_size; // BSS section size (if this is a BSS section)
 };
 
 enum class PHF { // Program Header Flags
     X = 1, // 可执行
     W = 2, // 可写
     R = 4 // 可读
+};
+
+enum class SHF { // Section Header Flags
+    ALLOC = 1, // 需要在运行时分配内存
+    WRITE = 2, // 可写
+    EXEC = 4, // 可执行
+    NOBITS = 8, // 不占用文件空间（如BSS）
+};
+
+struct SectionHeader {
+    std::string name; // 节名
+    uint32_t type; // 节类型
+    uint32_t flags; // 节标志
+    uint64_t addr; // 虚拟地址
+    uint64_t offset; // 在文件中的偏移
+    uint64_t size; // 节大小
+    uint32_t addralign; // 地址对齐要求
 };
 
 struct ProgramHeader {
@@ -63,6 +83,7 @@ struct FLEObject {
     std::map<std::string, FLESection> sections; // Section name -> section data
     std::vector<Symbol> symbols; // Global symbol table
     std::vector<ProgramHeader> phdrs; // Program headers (for .exe)
+    std::vector<SectionHeader> shdrs; // Section headers
     size_t entry = 0; // Entry point (for .exe)
 };
 
@@ -116,6 +137,23 @@ public:
     void write_entry(size_t entry)
     {
         result["entry"] = entry;
+    }
+
+    void write_section_headers(const std::vector<SectionHeader>& shdrs)
+    {
+        json shdrs_json = json::array();
+        for (const auto& shdr : shdrs) {
+            json shdr_json;
+            shdr_json["name"] = shdr.name;
+            shdr_json["type"] = shdr.type;
+            shdr_json["flags"] = shdr.flags;
+            shdr_json["addr"] = shdr.addr;
+            shdr_json["offset"] = shdr.offset;
+            shdr_json["size"] = shdr.size;
+            shdr_json["addralign"] = shdr.addralign;
+            shdrs_json.push_back(shdr_json);
+        }
+        result["shdrs"] = shdrs_json;
     }
 
 private:
@@ -176,4 +214,8 @@ void FLE_exec(const FLEObject& obj);
  */
 FLEObject FLE_ld(const std::vector<FLEObject>& objects);
 
+/**
+ * Read FLE object file
+ * @param obj The FLE object to read
+ */
 void FLE_readfle(const FLEObject& obj);

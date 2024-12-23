@@ -1,14 +1,18 @@
 // Global variables for absolute addressing test
-int value1 = 30;
-int value2 = 20;
-int value3 = 50;
-int result = 42;
+int result = 0;
+
+const char str[] = "Hello, World!";
 
 // Define our own entry point
 void _start()
 {
-    // Only use global variables to test absolute addressing
-    result = value1 + value2 + value3;
+    int ans = 0;
+
+    for (int i = 0; i < 10; i++) {
+        ans += str[i];
+    }
+
+    result = ans;
 
     // Exit directly using syscall
     asm volatile(

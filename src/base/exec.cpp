@@ -29,7 +29,11 @@ void FLE_exec(const FLEObject& obj)
         if (it == obj.sections.end()) {
             throw std::runtime_error("Section not found: " + phdr.name);
         }
-        memcpy(addr, it->second.data.data(), phdr.size);
+
+        // BSS段不需要复制数据，因为mmap已经返回零初始化的内存
+        if (phdr.name != ".bss" && !phdr.name.starts_with(".bss.")) {
+            memcpy(addr, it->second.data.data(), phdr.size);
+        }
 
         // Then, set the final permissions
         mprotect(addr, phdr.size,

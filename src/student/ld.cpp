@@ -29,7 +29,7 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
 
     for (const auto& obj : objects) {
         for (const auto& [section_name, raw_section] : obj.sections) {
-            if (!raw_section.data.size())
+            if (!raw_section.data.size() && raw_section.bss_size == 0)
                 continue;
 
             section_groups[section_name].push_back({
@@ -55,28 +55,62 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
         auto& sections = section_groups[name];
 
         FLESection merged_section;
+        size_t total_bss_size = 0;
+
         for (auto& raw_section : sections) {
             raw_section.offset = merged_section.data.size();
             raw_section.global_offset = section_vaddr + merged_section.data.size();
-            merged_section.data.insert(merged_section.data.end(),
-                raw_section.section.data.begin(), raw_section.section.data.end());
+
+            // 如果是 BSS 段，累加大小但不复制数据
+            if (name == ".bss") {
+                total_bss_size += raw_section.section.bss_size;
+            } else {
+                merged_section.data.insert(merged_section.data.end(),
+                    raw_section.section.data.begin(), raw_section.section.data.end());
+            }
+        }
+
+        // 如果是 BSS 段，设置其总大小
+        if (name == ".bss") {
+            merged_section.bss_size = total_bss_size;
         }
 
         uint32_t flags = 0;
+        uint32_t sh_flags = static_cast<uint32_t>(SHF::ALLOC); // 所有段都是ALLOC的
+
         if (name == ".text" || name.starts_with(".text.")) {
             flags = static_cast<uint32_t>(PHF::R) | static_cast<uint32_t>(PHF::X);
+            sh_flags |= static_cast<uint32_t>(SHF::EXEC);
         } else if (name == ".rodata" || name.starts_with(".rodata.")) {
             flags = static_cast<uint32_t>(PHF::R);
-        } else if (name == ".data" || name.starts_with(".data.")) {
+        } else if (name == ".data" || name.starts_with(".data.") || name == ".bss" || name.starts_with(".bss.")) {
             flags = static_cast<uint32_t>(PHF::R) | static_cast<uint32_t>(PHF::W);
+            sh_flags |= static_cast<uint32_t>(SHF::WRITE);
         }
 
-        auto section_size = static_cast<uint32_t>(merged_section.data.size());
+        if (name == ".bss" || name.starts_with(".bss.")) {
+            sh_flags |= static_cast<uint32_t>(SHF::NOBITS);
+        }
+
+        auto section_size = name == ".bss" ? static_cast<uint32_t>(total_bss_size) : static_cast<uint32_t>(merged_section.data.size());
+
+        // 添加程序头
         result.phdrs.push_back(ProgramHeader {
             .name = name,
             .vaddr = BASE_VADDR + section_vaddr,
             .size = section_size,
             .flags = flags });
+
+        // 添加节头
+        result.shdrs.push_back(SectionHeader {
+            .name = name,
+            .type = 1, // SHT_PROGBITS 或 SHT_NOBITS
+            .flags = sh_flags,
+            .addr = BASE_VADDR + section_vaddr,
+            .offset = section_vaddr, // 在文件中的偏移，对于BSS段这个值不重要
+            .size = section_size,
+            .addralign = 16 // 默认16字节对齐
+        });
 
         result.sections[name] = merged_section;
         section_vaddr += section_size;
@@ -162,6 +196,7 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
                 std::cout << "\nRelocation in " << name
                           << " from " << raw_section.file_name << std::endl;
                 std::cout << "  Type: " << (reloc.type == RelocationType::R_X86_64_32 ? "R_X86_64_32" : reloc.type == RelocationType::R_X86_64_PC32 ? "R_X86_64_PC32"
+                        : reloc.type == RelocationType::R_X86_64_32S                                                                                ? "R_X86_64_32S"
                                                                                                                                                     : "R_X86_64_64")
                           << " at offset 0x" << std::hex << reloc_global_offset
                           << " symbol=" << reloc.symbol
@@ -173,6 +208,7 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
                 int64_t value;
                 switch (reloc.type) {
                 case RelocationType::R_X86_64_32:
+                case RelocationType::R_X86_64_32S:
                     value = BASE_VADDR + symbol_value + reloc.addend;
                     break;
                 case RelocationType::R_X86_64_PC32:
@@ -190,6 +226,21 @@ FLEObject FLE_ld(const std::vector<FLEObject>& objects)
                 // 写入重定位值
                 size_t size = (reloc.type == RelocationType::R_X86_64_64) ? 8 : 4;
                 size_t reloc_offset = raw_section.offset + reloc.offset;
+
+                // 检查值是否在合法范围内
+                if (reloc.type == RelocationType::R_X86_64_32) {
+                    // 无符号32位，值必须为正且在uint32范围内
+                    if (value < 0 || value > UINT32_MAX) {
+                        throw std::runtime_error("Relocation value out of range for R_X86_64_32");
+                    }
+                } else if (reloc.type == RelocationType::R_X86_64_32S) {
+                    // 有符号32位，值必须在int32范围内
+                    if (value < INT32_MIN || value > INT32_MAX) {
+                        throw std::runtime_error("Relocation value out of range for R_X86_64_32S");
+                    }
+                }
+
+                // 写入值
                 for (size_t i = 0; i != size; ++i) {
                     result.sections[name].data[reloc_offset + i] = (value >> (i * 8)) & 0xFF;
                 }

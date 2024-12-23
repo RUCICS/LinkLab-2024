@@ -34,4 +34,4 @@ command = "${root_dir}/exec"
 args = ["${build_dir}/program"]
 
 [run.check]
-return_code = 100 # Expected return value: 100 (30 + 20 + 50)
+return_code = 120

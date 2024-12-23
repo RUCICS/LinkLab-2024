@@ -58,6 +58,10 @@ void FLE_objdump(const FLEObject& obj, FLEWriter& writer)
                         reloc_format = ".rel";
                     } else if (reloc.type == RelocationType::R_X86_64_32) {
                         reloc_format = ".abs";
+                    } else if (reloc.type == RelocationType::R_X86_64_64) {
+                        reloc_format = ".abs64";
+                    } else if (reloc.type == RelocationType::R_X86_64_32S) {
+                        reloc_format = ".abs32s";
                     }
 
                     std::stringstream ss;

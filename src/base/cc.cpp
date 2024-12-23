@@ -1,7 +1,6 @@
 #include "fle.hpp"
 #include "string_utils.hpp"
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <regex>
 #include <sstream>
@@ -32,46 +31,63 @@ std::string exec(std::string_view cmd)
     return result;
 }
 
-json elf_to_fle(const std::string& binary, const std::string& section)
+std::vector<std::string> elf_to_fle(const std::string& binary, const std::string& section, bool is_bss = false)
 {
-    std::string command = "objcopy --dump-section " + section + "=/dev/stdout " + binary;
-    std::string section_data = exec(command.c_str());
+    std::vector<std::string> res;
 
-    command = "readelf -r " + binary;
-    std::string relocs = exec(command.c_str());
-
-    command = "objdump -t " + binary;
+    // 先处理符号表
+    std::string command = "objdump -t " + binary;
     std::string names = exec(command.c_str());
 
     struct Symbol {
         char symb_type;
         std::string section;
         unsigned int offset;
+        unsigned int size;
         std::string name;
     };
 
     std::vector<Symbol> symbols;
-    // e.g.
-    // Addr            Flag Bind Sect      Size        Name
-    // 0000000000000000 g     F .text  000000000000001d foo
     std::regex symbol_pattern(
         R"(^([0-9a-fA-F]+)\s+(l|g|w)\s+(\w+)?\s+([.a-zA-Z0-9_]+)\s+([0-9a-fA-F]+)\s+(.*)$)");
     for (auto& line : splitlines(names)) {
         if (std::smatch match; std::regex_match(line, match, symbol_pattern)) {
-            unsigned int offset = std::stoul(match[1].str(), nullptr, 16);
-            char symb_type = match[2].str()[0];
-            std::string section = match[4].str();
-            std::string name = match[6].str();
+            if (match[4].str() == section) {
+                unsigned int offset = std::stoul(match[1].str(), nullptr, 16);
+                char symb_type = match[2].str()[0];
+                unsigned int size = std::stoul(match[5].str(), nullptr, 16);
+                std::string name = match[6].str();
 
-            symbols.push_back(Symbol(symb_type, section, offset, name));
+                symbols.push_back(Symbol(symb_type, section, offset, size, name));
+            }
         }
     }
 
+    // 如果是BSS段，只需要处理符号
+    if (is_bss) {
+        for (const auto& sym : symbols) {
+            std::string sym_line;
+            if (sym.symb_type == 'l') {
+                sym_line = "🏷️: " + sym.name + " " + std::to_string(sym.size);
+            } else if (sym.symb_type == 'g') {
+                sym_line = "📤: " + sym.name + " " + std::to_string(sym.size);
+            } else if (sym.symb_type == 'w') {
+                sym_line = "📎: " + sym.name + " " + std::to_string(sym.size);
+            }
+            res.push_back(sym_line);
+        }
+        return res;
+    }
+
+    // 对于非BSS段，还需要处理数据和重定位
+    command = "objcopy --dump-section " + section + "=/dev/stdout " + binary;
+    std::string section_data = exec(command.c_str());
+
+    command = "readelf -r " + binary;
+    std::string relocs = exec(command.c_str());
+
     std::map<int, std::pair<int, std::string>> relocations;
     bool enabled = true;
-    // e.g.
-    //   Offset          Info           Type           Sym. Value    Sym. Name + Addend
-    // 000000000059  001100000001 R_X86_64_64       0000000000000000 n + 0
     std::regex reloc_pattern(
         R"(^\s*([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+(\S+)\s+([0-9a-fA-F]+)\s+(.*)$)");
     for (auto& line : splitlines(relocs)) {
@@ -82,26 +98,25 @@ json elf_to_fle(const std::string& binary, const std::string& section)
                 int offset = std::stoi(match[1], nullptr, 16);
                 std::string symbol = match[5];
 
-                // 清理符号名（只去掉@PLT等后缀）
                 size_t at_pos = symbol.find('@');
                 if (at_pos != std::string::npos) {
                     symbol = symbol.substr(0, at_pos);
                 }
 
-                // 确定重定位类型和格式
                 std::string reloc_type = match[3];
                 std::string reloc_format;
                 if (reloc_type == "R_X86_64_PC32" || reloc_type == "R_X86_64_PLT32") {
-                    reloc_format = ".rel"; // 相对重定位
+                    reloc_format = ".rel";
                 } else if (reloc_type == "R_X86_64_64") {
-                    reloc_format = ".abs64"; // 64位绝对重定位
+                    reloc_format = ".abs64";
                 } else if (reloc_type == "R_X86_64_32") {
-                    reloc_format = ".abs"; // 32位绝对重定位
+                    reloc_format = ".abs";
+                } else if (reloc_type == "R_X86_64_32S") {
+                    reloc_format = ".abs32s";
                 } else {
                     throw std::runtime_error("Unsupported relocation type: " + reloc_type);
                 }
 
-                // 生成重定位表达式
                 std::stringstream ss;
                 ss << reloc_format << "(" << symbol << ")";
                 size_t size = (reloc_type == "R_X86_64_64") ? 8 : 4;
@@ -110,7 +125,6 @@ json elf_to_fle(const std::string& binary, const std::string& section)
         }
     }
 
-    std::vector<std::string> res;
     int skip = 0;
     std::vector<uint8_t> holding;
 
@@ -128,14 +142,14 @@ json elf_to_fle(const std::string& binary, const std::string& section)
 
     for (size_t i = 0, len = section_data.size(); i < len; ++i) {
         for (auto& sym : symbols) {
-            if (sym.section == section && sym.offset == i) {
+            if (sym.offset == i) {
                 do_dump(holding);
                 if (sym.symb_type == 'l') {
-                    res.push_back("🏷️: " + sym.name);
+                    res.push_back("🏷️: " + sym.name + " " + std::to_string(sym.size));
                 } else if (sym.symb_type == 'g') {
-                    res.push_back("📤: " + sym.name);
+                    res.push_back("📤: " + sym.name + " " + std::to_string(sym.size));
                 } else if (sym.symb_type == 'w') {
-                    res.push_back("📎: " + sym.name);
+                    res.push_back("📎: " + sym.name + " " + std::to_string(sym.size));
                 } else {
                     throw std::runtime_error("Unsupported symbol type: " + std::string(1, sym.symb_type));
                 }
@@ -165,6 +179,7 @@ json elf_to_fle(const std::string& binary, const std::string& section)
 constexpr std::array CFLAGS = {
     "-static"sv,
     // "-fPIE"sv,
+    "-fno-common"sv,
     "-nostdlib"sv,
     "-ffreestanding"sv,
     "-fno-asynchronous-unwind-tables"sv,
@@ -196,13 +211,11 @@ void FLE_cc(const std::vector<std::string>& options)
     std::string objdump_output = exec(command);
     auto lines = splitlines(objdump_output);
 
-    json res;
-    res["type"] = ".obj";
+    FLEWriter writer;
+    writer.set_type(".obj");
 
-    // e.g.
-    // Idx Name          Size      VMA               LMA               File off  Algn
-    // 0 .text         0000001d  0000000000000000  0000000000000000  00000040  2**0
-    //                  CONTENTS, ALLOC, LOAD, RELOC, READONLY, CODE
+    std::vector<SectionHeader> shdrs;
+
     std::regex section_pattern(R"(^\s*([0-9]+)\s+(\.(\w|\.)+)\s+([0-9a-fA-F]+)\s+.*$)");
     for (size_t i = 0; i < lines.size(); ++i) {
         std::smatch match;
@@ -219,16 +232,49 @@ void FLE_cc(const std::vector<std::string>& options)
 
             if (std::find(flags.begin(), flags.end(), "ALLOC") != flags.end()
                 && section.find("note.gnu.property") == std::string::npos) {
-                res[section] = elf_to_fle(binary, section);
+                uint32_t sh_flags = static_cast<uint32_t>(SHF::ALLOC);
+                if (std::find(flags.begin(), flags.end(), "WRITE") != flags.end()) {
+                    sh_flags |= static_cast<uint32_t>(SHF::WRITE);
+                }
+                if (std::find(flags.begin(), flags.end(), "EXECINSTR") != flags.end()) {
+                    sh_flags |= static_cast<uint32_t>(SHF::EXEC);
+                }
+
+                bool is_nobits = std::find(flags.begin(), flags.end(), "CONTENTS") == flags.end();
+                if (is_nobits) {
+                    sh_flags |= static_cast<uint32_t>(SHF::NOBITS);
+                }
+
+                uint64_t section_size = std::stoul(match[4].str(), nullptr, 16);
+
+                // 创建节头
+                SectionHeader shdr;
+                shdr.name = section;
+                shdr.type = is_nobits ? 8 : 1; // SHT_NOBITS : SHT_PROGBITS
+                shdr.flags = sh_flags;
+                shdr.addr = 0;
+                shdr.offset = 0;
+                shdr.size = section_size;
+                shdr.addralign = section == ".text" ? 16 : 8;
+                shdrs.push_back(shdr);
+
+                // 写入节的内容
+                writer.begin_section(section);
+                auto section_content = elf_to_fle(binary, section, is_nobits);
+                for (const auto& line : section_content) {
+                    writer.write_line(line);
+                }
+                writer.end_section();
             }
         }
     }
 
+    writer.write_section_headers(shdrs);
+
     std::filesystem::path input_path(binary);
     std::filesystem::path output_path = input_path.parent_path() / (input_path.stem().string() + ".fle");
     std::cout << "output_path: " << output_path << std::endl;
-    std::ofstream outfile(output_path);
-    outfile << res.dump(4) << std::endl;
+    writer.write_to_file(output_path.string());
 
     std::filesystem::remove(binary);
 }
