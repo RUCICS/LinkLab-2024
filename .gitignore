@@ -16,3 +16,5 @@ readelf
 
 **/*.o
 **/*.fle
+
+.autograder_result

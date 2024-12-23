@@ -975,7 +975,7 @@ def main():
             )
             percentage = (total_score / max_score * 100) if max_score > 0 else 0
             with open(".autograder_result", "w") as f:
-                f.write(str(percentage))
+                f.write(f"{percentage:.2f}")
 
         sys.exit(0 if all_passed else 1)
     except subprocess.CalledProcessError as e:
