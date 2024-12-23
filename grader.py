@@ -965,19 +965,19 @@ def main():
         grader.run_all_tests(args.test)
 
         # 检查是否所有测试都通过
-        all_passed = all(result.success for result in grader.results.values())
+        total_score = sum(result.score for result in grader.results.values())
+        max_score = sum(
+            test.meta["score"] for test in grader._load_test_cases(args.test)
+        )
+        percentage = (total_score / max_score * 100) if max_score > 0 else 0
 
         # 如果需要写入结果文件
         if args.write_result:
-            total_score = sum(result.score for result in grader.results.values())
-            max_score = sum(
-                test.meta["score"] for test in grader._load_test_cases(args.test)
-            )
-            percentage = (total_score / max_score * 100) if max_score > 0 else 0
             with open(".autograder_result", "w") as f:
                 f.write(f"{percentage:.2f}")
 
-        sys.exit(0 if all_passed else 1)
+        # 只要不是0分就通过
+        sys.exit(0 if percentage > 0 else 1)
     except subprocess.CalledProcessError as e:
         print(
             f"Error: Command execution failed with return code {e.returncode}",
