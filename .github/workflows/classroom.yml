@@ -21,6 +21,7 @@ jobs:
         run: |
           if [ $GITHUB_REPOSITORY = "RUCICS/LinkLab-2024" ]; then
             curl -o src/student/ld.cpp ${{ secrets.LINKLAB_REF_LD_GIST_URL }} 
+            curl -o src/student/nm.cpp ${{ secrets.LINKLAB_REF_NM_GIST_URL }} 
           fi
       
       - name: Set up Python
