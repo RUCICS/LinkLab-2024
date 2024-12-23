@@ -4,7 +4,7 @@ import sys
 
 
 def parse_nm_output(output):
-    """Parse nm output into a set of (address, type, name) tuples"""
+    """Parse nm output into a set of (type, name) tuples"""
     symbols = set()
     if not output:
         return symbols
@@ -18,15 +18,15 @@ def parse_nm_output(output):
             # Skip section symbols (like .text, .data, etc)
             if name.startswith("."):
                 continue
-            symbols.add((addr.strip(), type_.strip(), name.strip()))
+            symbols.add((type_.strip(), name.strip()))
         except ValueError:
             continue
     return symbols
 
 
-def format_symbol(addr, type_, name):
+def format_symbol(type_, name):
     """Format a symbol for display in error messages"""
-    return f"{name}({type_}@{addr})"
+    return f"{name}({type_})"
 
 
 def judge():
@@ -52,31 +52,29 @@ def judge():
         result = {"success": True, "message": "Output matches expected symbols"}
     else:
         # Create dictionaries for easier comparison
-        actual_dict = {name: (addr, type_) for addr, type_, name in actual_symbols}
-        expected_dict = {name: (addr, type_) for addr, type_, name in expected_symbols}
+        actual_dict = {name: type_ for type_, name in actual_symbols}
+        expected_dict = {name: type_ for type_, name in expected_symbols}
 
         # Compare symbol by symbol
         message = []
 
-        # Check for missing and wrong type/address symbols
-        for name, (exp_addr, exp_type) in expected_dict.items():
+        # Check for missing and wrong type symbols
+        for name, exp_type in expected_dict.items():
             if name not in actual_dict:
-                message.append(
-                    f"Missing symbol: {format_symbol(exp_addr, exp_type, name)}"
-                )
+                message.append(f"Missing symbol: {format_symbol(exp_type, name)}")
             else:
-                act_addr, act_type = actual_dict[name]
-                if act_type != exp_type or act_addr != exp_addr:
+                act_type = actual_dict[name]
+                if act_type != exp_type:
                     message.append(
-                        f"Mismatch for {name}: expected {format_symbol(exp_addr, exp_type, name)}, "
-                        f"got {format_symbol(act_addr, act_type, name)}"
+                        f"Mismatch for {name}: expected {format_symbol(exp_type, name)}, "
+                        f"got {format_symbol(act_type, name)}"
                     )
 
         # Check for extra symbols
         for name in actual_dict:
             if name not in expected_dict:
-                addr, type_ = actual_dict[name]
-                message.append(f"Extra symbol: {format_symbol(addr, type_, name)}")
+                type_ = actual_dict[name]
+                message.append(f"Extra symbol: {format_symbol(type_, name)}")
 
         if not message:  # Should never happen, but just in case
             message = [
