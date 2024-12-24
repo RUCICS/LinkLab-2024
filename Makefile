@@ -1,14 +1,10 @@
-# 1. 现在似乎改了fle.hpp，make tests不会自动识别病编译exec.cpp
-# 2. 编译选项是否应该和原有jyy的一致 -Os -g？
-
-
 CXX = g++
 CXXFLAGS = -std=c++20 -Wall -Wextra -I./include -Os -g -fPIE
 REQUIRED_CXX_STANDARD = 20
 
 # 源文件
-BASE_SRCS = src/base/main.cpp src/base/cc.cpp src/base/exec.cpp
-STUDENT_SRCS = src/student/ld.cpp src/student/nm.cpp src/student/objdump.cpp src/student/readfle.cpp
+BASE_SRCS = $(shell find src/base -name '*.cpp')
+STUDENT_SRCS = $(shell find src/student -name '*.cpp')
 HEADERS = $(shell find include -name '*.h' -o -name '*.hpp')
 
 # 所有源文件
