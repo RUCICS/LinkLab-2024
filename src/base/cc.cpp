@@ -1,7 +1,9 @@
 #include "fle.hpp"
 #include "string_utils.hpp"
+#include <algorithm>
 #include <filesystem>
-#include <iostream>
+#include <format>
+#include <ranges>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -11,174 +13,225 @@ using namespace std::string_literals;
 using namespace std::string_view_literals;
 
 namespace {
-std::string exec(std::string_view cmd)
+
+// 检查字符串是否包含子串
+constexpr bool str_contains(std::string_view str, std::string_view sub)
 {
-    auto final_cmd = cmd.data() + " 2>/dev/null"s;
-    FILE* pipe = popen(final_cmd.c_str(), "r");
-    if (!pipe) {
-        throw std::runtime_error("popen() failed!");
-    }
-
-    std::string result;
-    char buffer[128];
-    size_t bytes_read;
-
-    while ((bytes_read = fread(buffer, 1, sizeof(buffer), pipe)) != 0) {
-        result.append(buffer, bytes_read);
-    }
-
-    pclose(pipe);
-    return result;
+    return str.find(sub) != std::string_view::npos;
 }
 
-std::vector<std::string> elf_to_fle(const std::string& binary, const std::string& section, bool is_bss = false)
+// 检查容器是否包含元素
+template <typename Container, typename T>
+constexpr bool contains(const Container& container, const T& value)
 {
-    std::vector<std::string> res;
+    return std::find(std::begin(container), std::end(container), value) != std::end(container);
+}
 
-    // 先处理符号表
-    std::string command = "objdump -t " + binary;
-    std::string names = exec(command.c_str());
+// 执行系统命令并返回输出结果
+std::string execute_command(std::string_view cmd)
+{
+    auto command_with_stderr = std::format("{} 2>/dev/null", cmd);
+    if (FILE* pipe = popen(command_with_stderr.c_str(), "r")) {
+        std::string result;
+        std::array<char, 128> buffer;
+        while (size_t bytes_read = fread(buffer.data(), 1, buffer.size(), pipe)) {
+            result.append(buffer.data(), bytes_read);
+        }
+        pclose(pipe);
+        return result;
+    }
+    throw std::runtime_error("popen() failed!");
+}
 
-    struct Symbol {
-        char symb_type;
-        std::string section;
-        unsigned int offset;
-        unsigned int size;
-        std::string name;
+// 符号表项结构
+struct Symbol {
+    char type;
+    std::string section;
+    unsigned int offset;
+    unsigned int size;
+    std::string name;
+
+    // 添加构造函数使用 std::regex_match 的结果初始化
+    static Symbol from_regex_match(const std::smatch& match, std::string_view section)
+    {
+        return {
+            .type = match[2].str()[0],
+            .section = std::string { section },
+            .offset = static_cast<unsigned int>(std::stoul(match[1].str(), nullptr, 16)),
+            .size = static_cast<unsigned int>(std::stoul(match[5].str(), nullptr, 16)),
+            .name = match[6].str()
+        };
+    }
+};
+
+// 重定位类型到格式的映射
+struct RelocationFormat {
+    std::string_view format;
+    size_t size;
+};
+
+constexpr auto RELOCATION_FORMATS = std::array {
+    std::pair { "R_X86_64_PC32"sv, RelocationFormat { ".rel"sv, 4 } },
+    std::pair { "R_X86_64_PLT32"sv, RelocationFormat { ".rel"sv, 4 } },
+    std::pair { "R_X86_64_64"sv, RelocationFormat { ".abs64"sv, 8 } },
+    std::pair { "R_X86_64_32"sv, RelocationFormat { ".abs"sv, 4 } },
+    std::pair { "R_X86_64_32S"sv, RelocationFormat { ".abs32s"sv, 4 } }
+};
+
+// 解析符号表
+std::vector<Symbol> parse_symbols(const std::string& binary, std::string_view section)
+{
+    static const std::regex symbol_pattern {
+        R"(^([0-9a-fA-F]+)\s+(l|g|w)\s+(\w+)?\s+([.a-zA-Z0-9_]+)\s+([0-9a-fA-F]+)\s+(.*)$)"
     };
 
     std::vector<Symbol> symbols;
-    std::regex symbol_pattern(
-        R"(^([0-9a-fA-F]+)\s+(l|g|w)\s+(\w+)?\s+([.a-zA-Z0-9_]+)\s+([0-9a-fA-F]+)\s+(.*)$)");
-    for (auto& line : splitlines(names)) {
-        if (std::smatch match; std::regex_match(line, match, symbol_pattern)) {
-            if (match[4].str() == section) {
-                unsigned int offset = std::stoul(match[1].str(), nullptr, 16);
-                char symb_type = match[2].str()[0];
-                unsigned int size = std::stoul(match[5].str(), nullptr, 16);
-                std::string name = match[6].str();
+    const auto symbol_dump = execute_command(std::format("objdump -t {}", binary));
 
-                symbols.push_back(Symbol(symb_type, section, offset, size, name));
-            }
+    for (const auto& line : splitlines(symbol_dump)) {
+        if (std::smatch match; std::regex_match(line, match, symbol_pattern)
+            && match[4].str() == section) {
+            symbols.push_back(Symbol::from_regex_match(match, section));
         }
     }
+    return symbols;
+}
 
-    // 如果是BSS段，只需要处理符号
-    if (is_bss) {
-        for (const auto& sym : symbols) {
-            std::string sym_line;
-            if (sym.symb_type == 'l') {
-                sym_line = "🏷️: " + sym.name + " " + std::to_string(sym.size);
-            } else if (sym.symb_type == 'g') {
-                sym_line = "📤: " + sym.name + " " + std::to_string(sym.size);
-            } else if (sym.symb_type == 'w') {
-                sym_line = "📎: " + sym.name + " " + std::to_string(sym.size);
-            }
-            res.push_back(sym_line);
-        }
-        return res;
+// 生成符号行
+std::string format_symbol_line(char type, std::string_view name, unsigned int size)
+{
+    switch (type) {
+    case 'l':
+        return std::format("🏷️: {} {}", name, size);
+    case 'g':
+        return std::format("📤: {} {}", name, size);
+    case 'w':
+        return std::format("📎: {} {}", name, size);
+    default:
+        throw std::runtime_error(std::format("Unsupported symbol type: {}", type));
     }
+}
 
-    // 对于非BSS段，还需要处理数据和重定位
-    command = "objcopy --dump-section " + section + "=/dev/stdout " + binary;
-    std::string section_data = exec(command.c_str());
-
-    command = "readelf -r " + binary;
-    std::string relocs = exec(command.c_str());
-
-    std::map<int, std::pair<int, std::string>> relocations;
-    bool enabled = true;
-    std::regex reloc_pattern(
-        R"(^\s*([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+(\S+)\s+([0-9a-fA-F]+)\s+(.*)$)");
-    for (auto& line : splitlines(relocs)) {
-        if (line.find("Relocation section") != std::string::npos) {
-            enabled = line.find(".rela" + section) != std::string::npos;
-        } else if (enabled) {
-            if (std::smatch match; std::regex_match(line, match, reloc_pattern)) {
-                int offset = std::stoi(match[1], nullptr, 16);
-                std::string symbol = match[5];
-
-                size_t at_pos = symbol.find('@');
-                if (at_pos != std::string::npos) {
-                    symbol = symbol.substr(0, at_pos);
-                }
-
-                std::string reloc_type = match[3];
-                std::string reloc_format;
-                if (reloc_type == "R_X86_64_PC32" || reloc_type == "R_X86_64_PLT32") {
-                    reloc_format = ".rel";
-                } else if (reloc_type == "R_X86_64_64") {
-                    reloc_format = ".abs64";
-                } else if (reloc_type == "R_X86_64_32") {
-                    reloc_format = ".abs";
-                } else if (reloc_type == "R_X86_64_32S") {
-                    reloc_format = ".abs32s";
-                } else {
-                    throw std::runtime_error("Unsupported relocation type: " + reloc_type);
-                }
-
-                std::stringstream ss;
-                ss << reloc_format << "(" << symbol << ")";
-                size_t size = (reloc_type == "R_X86_64_64") ? 8 : 4;
-                relocations[offset] = { size, ss.str() };
-            }
-        }
-    }
-
-    int skip = 0;
-    std::vector<uint8_t> holding;
-
-    auto do_dump = [&](std::vector<uint8_t>& holding) {
-        if (!holding.empty()) {
-            std::stringstream ss;
-            ss << "🔢: ";
-            for (auto& byte : holding) {
-                ss << std::hex << std::setw(2) << std::setfill('0') << (int)byte << " ";
-            }
-            res.push_back(trim(ss.str()));
-            holding.clear();
-        }
+// 解析重定位信息
+std::map<int, std::pair<int, std::string>> parse_relocations(
+    const std::string& binary, std::string_view section)
+{
+    static const std::regex reloc_pattern {
+        R"(^\s*([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+(\S+)\s+([0-9a-fA-F]+)\s+(.*)$)"
     };
 
-    for (size_t i = 0, len = section_data.size(); i < len; ++i) {
-        for (auto& sym : symbols) {
+    std::map<int, std::pair<int, std::string>> relocations;
+    const auto reloc_dump = execute_command(std::format("readelf -r {}", binary));
+    bool in_section = false;
+
+    for (const auto& line : splitlines(reloc_dump)) {
+        if (str_contains(line, "Relocation section")) {
+            in_section = str_contains(line, std::format(".rela{}", section));
+            continue;
+        }
+
+        if (!in_section)
+            continue;
+
+        if (std::smatch match; std::regex_match(line, match, reloc_pattern)) {
+            const int offset = std::stoi(match[1].str(), nullptr, 16);
+            std::string symbol = match[5].str();
+
+            if (const auto at_pos = symbol.find('@'); at_pos != std::string::npos) {
+                symbol.resize(at_pos);
+            }
+
+            const std::string reloc_type = match[3].str();
+            const auto format_it = std::find_if(RELOCATION_FORMATS.begin(), RELOCATION_FORMATS.end(),
+                [reloc_type](const auto& pair) { return pair.first == reloc_type; });
+
+            if (format_it == RELOCATION_FORMATS.end()) {
+                throw std::runtime_error(std::format("Unsupported relocation type: {}", reloc_type));
+            }
+
+            const auto& [_, format] = *format_it;
+            relocations.emplace(offset,
+                std::pair { static_cast<int>(format.size),
+                    std::format("{}({})", format.format, symbol) });
+        }
+    }
+    return relocations;
+}
+
+std::vector<std::string> elf_to_fle(
+    const std::string& binary, std::string_view section, bool is_bss = false)
+{
+    std::vector<std::string> result;
+    const auto symbols = parse_symbols(binary, section);
+
+    // BSS段只需处理符号
+    if (is_bss) {
+        std::ranges::transform(symbols, std::back_inserter(result),
+            [](const auto& sym) { return format_symbol_line(sym.type, sym.name, sym.size); });
+        return result;
+    }
+
+    // 获取节数据和重定位信息
+    const auto section_data = execute_command(
+        std::format("objcopy --dump-section {}=/dev/stdout {}", section, binary));
+    const auto relocations = parse_relocations(binary, section);
+
+    // 处理数据
+    int skip = 0;
+    std::vector<uint8_t> holding;
+    holding.reserve(16);
+
+    auto dump_holding = [&result](std::span<const uint8_t> holding) {
+        if (holding.empty())
+            return;
+
+        std::string hex_dump;
+        hex_dump.reserve(3 * holding.size());
+        for (auto byte : holding) {
+            std::format_to(std::back_inserter(hex_dump), "{:02x} ", byte);
+        }
+        result.push_back(std::format("🔢: {}", trim(hex_dump)));
+    };
+
+    for (size_t i = 0; i < section_data.size(); ++i) {
+        // 处理符号
+        for (const auto& sym : symbols) {
             if (sym.offset == i) {
-                do_dump(holding);
-                if (sym.symb_type == 'l') {
-                    res.push_back("🏷️: " + sym.name + " " + std::to_string(sym.size));
-                } else if (sym.symb_type == 'g') {
-                    res.push_back("📤: " + sym.name + " " + std::to_string(sym.size));
-                } else if (sym.symb_type == 'w') {
-                    res.push_back("📎: " + sym.name + " " + std::to_string(sym.size));
-                } else {
-                    throw std::runtime_error("Unsupported symbol type: " + std::string(1, sym.symb_type));
-                }
+                dump_holding(holding);
+                holding.clear();
+                result.push_back(format_symbol_line(sym.type, sym.name, sym.size));
             }
         }
-        if (relocations.find(i) != relocations.end()) {
-            auto [skip_temp, reloc] = relocations[i];
-            do_dump(holding);
-            res.push_back("❓: " + reloc);
-            skip = skip_temp;
+
+        // 处理重定位
+        if (const auto it = relocations.find(i); it != relocations.end()) {
+            dump_holding(holding);
+            holding.clear();
+            const auto& [size, reloc] = it->second;
+            result.push_back(std::format("❓: {}", reloc));
+            skip = size;
         }
+
         if (skip > 0) {
             --skip;
         } else {
             holding.push_back(section_data[i]);
             if (holding.size() == 16) {
-                do_dump(holding);
+                dump_holding(holding);
+                holding.clear();
             }
         }
     }
-    do_dump(holding);
+    dump_holding(holding);
 
-    return res;
-}
+    return result;
 }
 
-constexpr std::array CFLAGS = {
+} // anonymous namespace
+
+// 编译选项
+constexpr auto COMPILER_FLAGS = std::array {
     "-static"sv,
-    // "-fPIE"sv,
     "-fno-common"sv,
     "-nostdlib"sv,
     "-ffreestanding"sv,
@@ -187,93 +240,104 @@ constexpr std::array CFLAGS = {
 
 void FLE_cc(const std::vector<std::string>& options)
 {
-    std::cout << "options: " << join(options, " ") << std::endl;
+    // std::cout << std::format("options: {}\n", join(options, " "));
 
-    auto it = std::find(options.begin(), options.end(), "-o");
-    std::string binary;
-    if (it == options.end() || ++it == options.end()) {
-        binary = "a.out";
-    } else {
-        binary = *it;
-    }
-    std::cout << "binary: " << binary << std::endl;
+    // 确定输出文件名
+    const auto output_it = std::find(options.begin(), options.end(), "-o");
+    const std::string binary = (output_it != options.end() && std::next(output_it) != options.end())
+        ? *std::next(output_it)
+        : "a.out";
+    // std::cout << std::format("binary: {}\n", binary);
 
+    // 编译命令
     std::vector<std::string> gcc_cmd = { "gcc", "-c" };
-    gcc_cmd.insert(gcc_cmd.end(), CFLAGS.begin(), CFLAGS.end());
+    gcc_cmd.insert(gcc_cmd.end(), COMPILER_FLAGS.begin(), COMPILER_FLAGS.end());
     gcc_cmd.insert(gcc_cmd.end(), options.begin(), options.end());
 
-    std::string command = join(gcc_cmd, " ");
-    if (std::system(command.c_str()) != 0) {
-        throw std::runtime_error("gcc command failed");
+    if (std::system(join(gcc_cmd, " ").c_str()) != 0) {
+        throw std::runtime_error("gcc compilation failed");
     }
 
-    command = "objdump -h " + binary;
-    std::string objdump_output = exec(command);
-    auto lines = splitlines(objdump_output);
-
+    // 解析目标文件
+    const auto objdump_output = execute_command(std::format("objdump -h {}", binary));
     FLEWriter writer;
     writer.set_type(".obj");
 
-    std::vector<SectionHeader> shdrs;
+    // 处理每个节
+    static const std::regex section_pattern {
+        R"(^\s*([0-9]+)\s+(\.(\w|\.)+)\s+([0-9a-fA-F]+)\s+.*$)"
+    };
 
-    std::regex section_pattern(R"(^\s*([0-9]+)\s+(\.(\w|\.)+)\s+([0-9a-fA-F]+)\s+.*$)");
-    for (size_t i = 0; i < lines.size(); ++i) {
+    auto lines = splitlines(objdump_output);
+    std::vector<SectionHeader> section_headers;
+    std::vector<std::pair<std::string, bool>> sections_to_process;
+
+    // 第一遍扫描:收集节头信息
+    for (auto it = lines.begin(); it != lines.end(); ++it) {
         std::smatch match;
-        if (std::regex_match(lines[i], match, section_pattern)) {
-            std::string section = match[2];
-            std::string flags_line = lines[i + 1];
-            std::vector<std::string> flags;
-            std::stringstream ss(flags_line);
-            std::string flag;
-            while (std::getline(ss, flag, ',')) {
-                flag = trim(flag);
-                flags.push_back(flag);
-            }
-
-            if (std::find(flags.begin(), flags.end(), "ALLOC") != flags.end()
-                && section.find("note.gnu.property") == std::string::npos) {
-                uint32_t sh_flags = static_cast<uint32_t>(SHF::ALLOC);
-                if (std::find(flags.begin(), flags.end(), "WRITE") != flags.end()) {
-                    sh_flags |= static_cast<uint32_t>(SHF::WRITE);
-                }
-                if (std::find(flags.begin(), flags.end(), "EXECINSTR") != flags.end()) {
-                    sh_flags |= static_cast<uint32_t>(SHF::EXEC);
-                }
-
-                bool is_nobits = std::find(flags.begin(), flags.end(), "CONTENTS") == flags.end();
-                if (is_nobits) {
-                    sh_flags |= static_cast<uint32_t>(SHF::NOBITS);
-                }
-
-                uint64_t section_size = std::stoul(match[4].str(), nullptr, 16);
-
-                // 创建节头
-                SectionHeader shdr;
-                shdr.name = section;
-                shdr.type = is_nobits ? 8 : 1; // SHT_NOBITS : SHT_PROGBITS
-                shdr.flags = sh_flags;
-                shdr.addr = 0;
-                shdr.offset = 0;
-                shdr.size = section_size;
-                shdr.addralign = section == ".text" ? 16 : 8;
-                shdrs.push_back(shdr);
-
-                // 写入节的内容
-                writer.begin_section(section);
-                auto section_content = elf_to_fle(binary, section, is_nobits);
-                for (const auto& line : section_content) {
-                    writer.write_line(line);
-                }
-                writer.end_section();
-            }
+        if (!std::regex_match(*it, match, section_pattern)) {
+            continue;
         }
+
+        const std::string section_name = match[2];
+        const std::string flags_line = *++it;
+
+        // 解析节标志
+        std::vector<std::string> flags;
+        std::istringstream ss(flags_line);
+        std::string flag;
+        while (std::getline(ss, flag, ',')) {
+            flags.push_back(trim(flag));
+        }
+
+        // 检查是否需要处理该节
+        if (!contains(flags, "ALLOC") || str_contains(section_name, "note.gnu.property")) {
+            continue;
+        }
+
+        // 设置节标志
+        uint32_t sh_flags = static_cast<uint32_t>(SHF::ALLOC);
+        if (contains(flags, "WRITE")) {
+            sh_flags |= static_cast<uint32_t>(SHF::WRITE);
+        }
+        if (contains(flags, "EXECINSTR")) {
+            sh_flags |= static_cast<uint32_t>(SHF::EXEC);
+        }
+
+        const bool is_nobits = !contains(flags, "CONTENTS");
+        if (is_nobits) {
+            sh_flags |= static_cast<uint32_t>(SHF::NOBITS);
+        }
+
+        // 创建节头
+        section_headers.push_back(SectionHeader {
+            .name = section_name,
+            .type = static_cast<uint32_t>(is_nobits ? 8 : 1),
+            .flags = sh_flags,
+            .addr = 0,
+            .offset = 0,
+            .size = std::stoul(match[4].str(), nullptr, 16),
+            .addralign = static_cast<uint32_t>(section_name == ".text" ? 16 : 8) });
+
+        sections_to_process.emplace_back(section_name, is_nobits);
     }
 
-    writer.write_section_headers(shdrs);
+    // 先写入所有节头
+    writer.write_section_headers(section_headers);
 
-    std::filesystem::path input_path(binary);
-    std::filesystem::path output_path = input_path.parent_path() / (input_path.stem().string() + ".fle");
-    std::cout << "output_path: " << output_path << std::endl;
+    // 第二遍:写入节数据
+    for (const auto& [section_name, is_nobits] : sections_to_process) {
+        writer.begin_section(section_name);
+        for (const auto& line : elf_to_fle(binary, section_name, is_nobits)) {
+            writer.write_line(line);
+        }
+        writer.end_section();
+    }
+
+    // 写入输出文件
+    const std::filesystem::path input_path { binary };
+    const auto output_path = input_path.parent_path() / std::format("{}.fle", input_path.stem().string());
+    // std::cout << std::format("output_path: {}\n", output_path.string());
     writer.write_to_file(output_path.string());
 
     std::filesystem::remove(binary);
